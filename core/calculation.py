@@ -1,18 +1,23 @@
-# ----- Build-In Modules -----
-import math
-
-
-def calculate_pages(pages) -> int:
+def calculate_pages(pages: int) -> int:
     """
-    Return the total number of pages after padding to a multiple of 4.
+    Return the page count padded up to the next multiple of 4.
 
-    Folios are printed in sheets of 4 pages, so this function computes the
-    smallest page count that is divisible by 4 and returns that total.
+    Booklets are printed in sheets of four pages (two per side). This
+    function returns the smallest integer greater than or equal to
+    ``pages`` that is divisible by 4.
 
-    Example:
+    Args:
+        pages: The original number of pages in the document.
+
+    Returns:
+        The padded page count (a multiple of 4).
+
+    Examples:
+        >>> calculate_pages(16) -> 16
         >>> calculate_pages(17) -> 20
     """
-    padded: int = math.ceil(pages / 4) * 4
+    # For rounding up to a multiple of N, the general formula is: ((x + N - 1) // N) * N
+    padded: int = ((pages + 3) // 4) * 4
     blanks_needed: int = padded - pages
 
     return blanks_needed + pages
@@ -81,7 +86,18 @@ def get_imposition_order(number_pages: int) -> list[tuple[int, int]]:
 
 
 def impose(number_pages: int) -> list[tuple[int, int]]:
+    """
+    Return the printable imposition order with blanks for padded pages.
+
+    Args:
+        number_pages: Total number of pages in the document.
+
+    Returns:
+        A list of tuples representing the printable imposition order.
+        Pages that exceed the original page count are replaced with 0.
+    """
     order: list[tuple[int, int]] = get_imposition_order(number_pages)
+
     # Remap page numbers > number_pages to 0 (blank)
     return [
         (l if l <= number_pages else 0, r if r <= number_pages else 0) for l, r in order
