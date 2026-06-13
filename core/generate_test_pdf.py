@@ -1,29 +1,18 @@
-# ----- Built-In Modules-----
+# ----- Built-In Modules -----
 import argparse
 
 # ----- ReportLab Modules -----
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
 
+# ----- Utils Modules-----
+from utils.format_utils import zero_padding
+
 # ----- Module-Level Constants -----
 PAGE_WIDTH, PAGE_HEIGHT = A4
 
 
 # ----- Function Definitions -----
-def zero_padding(number: int, width: int = 2) -> str:
-    """
-    Return the given number as a zero-padded string.
-
-    Args:
-        number: The integer to format.
-        width: The minimum width of the returned string, padded with leading zeros.
-
-    Returns:
-        A string representation of the number with leading zeros as needed.
-    """
-    return f"{number:0{width}d}"
-
-
 def draw_numbered_page(
     c: canvas.Canvas,
     number: int,
@@ -86,7 +75,7 @@ def generate_test_pdf(
         draw_numbered_page(c, i, book_size, font_size, line_width)
 
     c.save()
-    print(f"Saved {zero_padding(page_count)}-page test PDF to: {output_path}")
+    print(f"Generated {zero_padding(page_count)}-page test PDF → {output_path}")
 
 
 def main() -> None:
