@@ -8,6 +8,19 @@ from core.calculation import impose
 def place_pages_side_by_side(
     source: Pdf, output: Pdf, left_index: int | None, right_index: int | None
 ) -> None:
+    """
+    Place two pages side-by-side on a new output page.
+
+    Extracts pages from the source PDF at the given indices, scales them to fit
+    within half the output page width, and positions them side-by-side on a new
+    output page.
+
+    Args:
+        source: The source PDF object to read pages from.
+        output: The output PDF object to append the new page to.
+        left_index: Index of the page to place on the left side, or None if blank.
+        right_index: Index of the page to place on the right side, or None if blank.
+    """
     page_width, page_height = 841.89, 595.28
     half_width: float = page_width / 2  # half_width = 420.945
 
@@ -54,7 +67,19 @@ def place_pages_side_by_side(
     page.Contents = Stream(output, content_stream)
 
 
-def build_booklet(input_path: str, output_path: str):
+def build_booklet(input_path: str, output_path: str) -> None:
+    """
+    Create a booklet-imposed PDF from an input PDF file.
+
+    Reads the PDF at input_path, computes an imposition order using
+    core.calculation.impose, places two pages side-by-side per output
+    page and writes the resulting PDF to output_path.
+
+    Args:
+        input_path: Path to the source PDF file.
+        output_path: Path where the imposed PDF will be saved.
+    """
+
     source: Pdf = Pdf.open(input_path)
     page_numbers: int = len(source.pages)
     order: list[tuple[int, int]] = impose(page_numbers)
@@ -75,4 +100,6 @@ def build_booklet(input_path: str, output_path: str):
 
 
 if __name__ == "__main__":
-    pass
+    paths: list[str] = input("Provide the input and output paths: ").split()
+    input_path, output_path = paths[0], paths[1]
+    build_booklet(input_path, output_path)
