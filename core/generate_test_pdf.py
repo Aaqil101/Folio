@@ -16,7 +16,7 @@ PAGE_WIDTH, PAGE_HEIGHT = A4
 def draw_numbered_page(
     c: canvas.Canvas,
     number: int,
-    book_size: tuple[int, int],
+    box_size: tuple[int, int],
     font_size: int,
     line_width: int,
 ) -> None:
@@ -30,20 +30,20 @@ def draw_numbered_page(
     Args:
         c: A reportlab.pdfgen.canvas.Canvas to draw onto.
         number: The integer to draw centered in the box.
-        book_size: A tuple containing the width and height of the book in points.
+        box_size: A tuple containing the width and height of the book in points.
         font_size: The font size for the page number text.
         line_width: The width of the rectangle border.
     """
 
-    box_x: float = (PAGE_WIDTH - book_size[0]) / 2
-    box_y: float = (PAGE_HEIGHT - book_size[1]) / 2
+    box_x: float = (PAGE_WIDTH - box_size[0]) / 2
+    box_y: float = (PAGE_HEIGHT - box_size[1]) / 2
 
     c.setLineWidth(line_width)
-    c.rect(box_x, box_y, book_size[0], book_size[1], stroke=1, fill=0)
+    c.rect(box_x, box_y, box_size[0], box_size[1], stroke=1, fill=0)
 
     c.setFont("Helvetica-Bold", font_size)
     text_x: float = PAGE_WIDTH / 2
-    text_y: float = box_y + (book_size[1] - font_size * 0.7) / 2
+    text_y: float = box_y + (box_size[1] - font_size * 0.7) / 2
     c.drawCentredString(text_x, text_y, zero_padding(number))
 
     c.showPage()
@@ -52,7 +52,7 @@ def draw_numbered_page(
 def generate_test_pdf(
     page_count: int,
     output_path: str,
-    book_size: tuple[int, int],
+    box_size: tuple[int, int],
     font_size: int,
     line_width: int,
 ) -> int:
@@ -62,7 +62,7 @@ def generate_test_pdf(
     Args:
         page_count: Number of pages to generate.
         output_path: Path to write the generated PDF file.
-        book_size: A tuple containing the width and height of the book in points.
+        box_size: A tuple containing the width and height of the book in points.
         font_size: The font size for the page numbers.
         line_width: The width of the rectangle border.
     Returns:
@@ -72,7 +72,7 @@ def generate_test_pdf(
     c = canvas.Canvas(output_path, pagesize=A4)
 
     for i in range(1, page_count + 1):
-        draw_numbered_page(c, i, book_size, font_size, line_width)
+        draw_numbered_page(c, i, box_size, font_size, line_width)
 
     c.save()
     print(f"Generated {zero_padding(page_count)}-page test PDF → {output_path}")
@@ -106,7 +106,7 @@ def main() -> None:
         nargs=2,
         default=[400, 400],
         metavar=("WIDTH", "HEIGHT"),
-        help="Book size in points (default: 400 400)",
+        help="Box size in points (default: 400 400)",
     )
     layout_group.add_argument(
         "--font",
@@ -129,8 +129,8 @@ def main() -> None:
     if args.output is None:
         args.output = f"test_{zero_padding(args.pages)}_pages.pdf"
 
-    book_size: tuple[int, int] = (args.book[0], args.book[1])
-    generate_test_pdf(args.pages, args.output, book_size, args.font, args.line)
+    box_size: tuple[int, int] = (args.book[0], args.book[1])
+    generate_test_pdf(args.pages, args.output, box_size, args.font, args.line)
 
 
 if __name__ == "__main__":
