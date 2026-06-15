@@ -101,7 +101,7 @@ def main() -> None:
     # Layout settings
     layout_group: argparse._ArgumentGroup = parser.add_argument_group("Layout settings")
     layout_group.add_argument(
-        "--book",
+        "--box",
         type=int,
         nargs=2,
         default=[400, 400],
@@ -129,7 +129,7 @@ def main() -> None:
     if args.output is None:
         args.output = f"test_{zero_padding(args.pages)}_pages.pdf"
 
-    box_size: tuple[int, int] = (args.book[0], args.book[1])
+    box_size: tuple[int, int] = (args.box[0], args.box[1])
     generate_test_pdf(args.pages, args.output, box_size, args.font, args.line)
 
 

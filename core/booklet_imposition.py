@@ -83,6 +83,7 @@ def build_booklet(input_path: str, output_path: str) -> None:
     source: Pdf = Pdf.open(input_path)
     page_numbers: int = len(source.pages)
     order: list[tuple[int, int]] = impose(page_numbers)
+    print(order)
 
     output: Pdf = Pdf.new()  # ONE pdf object for everything
 
