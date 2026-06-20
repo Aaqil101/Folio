@@ -1,8 +1,15 @@
+# ----- Built-In Modules -----
+import io
+
+# ----- PyMuPDF Modules -----
+import fitz
+
 # ----- PikePDF Modules -----
 from pikepdf import Array, Dictionary, Name, Object, Page, Pdf, Stream
 
 # ----- Core Modules -----
 from core.calculation import impose
+from core.verify_booklet import stamp_page_numbers, verify_booklet
 
 
 def place_pages_side_by_side(
@@ -80,7 +87,13 @@ def build_booklet(input_path: str, output_path: str) -> None:
         output_path: Path where the imposed PDF will be saved.
     """
 
-    source: Pdf = Pdf.open(input_path)
+    fitz_doc = fitz.open(input_path)
+    stamp_page_numbers(fitz_doc)
+    stamped_bytes = fitz_doc.tobytes()
+    fitz_doc.close()
+
+    source: Pdf = Pdf.open(io.BytesIO(stamped_bytes))
+
     page_numbers: int = len(source.pages)
     order: list[tuple[int, int]] = impose(page_numbers)
     print(order)
@@ -96,6 +109,7 @@ def build_booklet(input_path: str, output_path: str) -> None:
         # so the helper can read pages from `source` and append new pages to `output`.
         place_pages_side_by_side(source, output, left_index, right_index)
 
+    verify_booklet(output, order)
     output.save(output_path)
     print("Booklet saved to:", output_path)
 

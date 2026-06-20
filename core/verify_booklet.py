@@ -20,4 +20,5 @@ HALF_WIDTH: float = PAGE_WIDTH / 2
 STAMP_MARGIN: float = 10.0
 STAMP_FONT_SIZE: float = 6.0
 
+
 # ----- Function Definitions -----
