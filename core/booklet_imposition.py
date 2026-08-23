@@ -1,5 +1,6 @@
 # ----- Built-In Modules -----
 import io
+import shlex
 
 # ----- PyMuPDF Modules -----
 import fitz
@@ -22,7 +23,7 @@ def place_pages_side_by_side(
     within half the output page width, and positions them side-by-side on a new
     output page.
 
-    Args:
+    Arguments:
         source: The source PDF object to read pages from.
         output: The output PDF object to append the new page to.
         left_index: Index of the page to place on the left side, or None if blank.
@@ -82,7 +83,7 @@ def build_booklet(input_path: str, output_path: str) -> None:
     core.calculation.impose, places two pages side-by-side per output
     page and writes the resulting PDF to output_path.
 
-    Args:
+    Arguments:
         input_path: Path to the source PDF file.
         output_path: Path where the imposed PDF will be saved.
     """
@@ -98,7 +99,7 @@ def build_booklet(input_path: str, output_path: str) -> None:
     order: list[tuple[int, int]] = impose(page_numbers)
     print(order)
 
-    output: Pdf = Pdf.new()  # ONE pdf object for everything
+    output: Pdf = Pdf.new()  # ONE PDF object for everything
 
     for left_page, right_page in order:
         left_index: int | None = left_page - 1 if left_page else None
@@ -115,6 +116,6 @@ def build_booklet(input_path: str, output_path: str) -> None:
 
 
 if __name__ == "__main__":
-    paths: list[str] = input("Provide the input and output paths: ").split()
+    paths: list[str] = shlex.split(input("Provide the input and output paths: "))
     input_path, output_path = paths[0], paths[1]
     build_booklet(input_path, output_path)
