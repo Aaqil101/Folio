@@ -2,14 +2,11 @@
 import argparse
 
 # ----- ReportLab Modules -----
-from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
 
 # ----- Utils Modules-----
+from utils.constants import PAGE_HEIGHT, PAGE_WIDTH
 from utils.format_utils import zero_padding
-
-# ----- Module-Level Constants -----
-PAGE_WIDTH, PAGE_HEIGHT = A4
 
 
 # ----- Function Definitions -----
@@ -21,15 +18,15 @@ def draw_numbered_page(
     line_width: int,
 ) -> None:
     """
-    Draw a single PDF page with a centered numbered box.
+    Draw a single PDF page with a centred numbered box.
 
-    The function draws a rectangle of size BOX_WIDTH x BOX_HEIGHT centered on
+    The function draws a rectangle of size BOX_WIDTH x BOX_HEIGHT centred on
     the A4 page, then renders the provided number in large bold Helvetica
-    centered inside the box. Finally it advances the canvas to a new page.
+    centred inside the box. Finally it advances the canvas to a new page.
 
-    Args:
+    Arguments:
         c: A reportlab.pdfgen.canvas.Canvas to draw onto.
-        number: The integer to draw centered in the box.
+        number: The integer to draw centred in the box.
         box_size: A tuple containing the width and height of the book in points.
         font_size: The font size for the page number text.
         line_width: The width of the rectangle border.
@@ -59,7 +56,7 @@ def generate_test_pdf(
     """
     Generate a numbered test PDF file with the given page count.
 
-    Args:
+    Arguments:
         page_count: Number of pages to generate.
         output_path: Path to write the generated PDF file.
         box_size: A tuple containing the width and height of the book in points.
@@ -69,7 +66,7 @@ def generate_test_pdf(
         The number of pages written to the generated PDF.
     """
 
-    c = canvas.Canvas(output_path, pagesize=A4)
+    c = canvas.Canvas(output_path, pagesize=(PAGE_WIDTH, PAGE_HEIGHT))
 
     for i in range(1, page_count + 1):
         draw_numbered_page(c, i, box_size, font_size, line_width)
