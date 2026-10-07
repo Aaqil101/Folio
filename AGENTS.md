@@ -14,19 +14,26 @@ Folio turns PDFs into print-ready booklets (two-up imposition). Plain Python, no
 - No lint, typecheck, or test framework exists. "Testing" = manual script runs checked by eye: `print(order)`, then `Verifying N sheets...`, per-sheet `FAIL` lines, and `Result: X/Y sheets passed`. **Do not introduce pytest/unittest or new tooling unless asked** — this is a deliberate project convention (GitHub issues #9/#10).
 - Verification output comes from `build_booklet()` itself; `verify_booklet.py` has no CLI.
 
+## Commits
+
+- Commit only when explicitly asked, then **one commit per file or logical change** — don't bundle unrelated edits.
+- Message style: a short imperative summary line (sentence case), followed by a body of `- ` bullet descriptions of what changed. Examples in `git log` (e.g. `Derive verifier width from shared A4 constants`).
+- Check `git status`/`git diff` before staging; stage files individually rather than `git add -A`.
+
 ## Architecture
 
 - `core/calculation.py` — `impose(number_pages)` returns `(left, right)` 1-based page-number pairs. Page count pads to a multiple of 4; `0` is the sentinel for a blank/padding side.
-- `core/booklet_imposition.py` — `build_booklet()`: PyMuPDF stamps every source page with an invisible 4-digit page number (`render_mode=3`, PDF operator `Tr 3`), bridges bytes into pikepdf via `io.BytesIO`, imposes pages side-by-side with form XObjects, calls `verify_booklet()` before saving. Output is landscape A4 (841.89 × 595.28 pt); half-width `420.945` splits left/right.
+- `core/booklet_imposition.py` — `build_booklet()`: PyMuPDF stamps every source page with an invisible 4-digit page number (`render_mode=3`, PDF operator `Tr 3`), bridges bytes into pikepdf via `io.BytesIO`, calls `verify_booklet()` before saving. The helper `place_pages_side_by_side(source: fitz.Document, output: fitz.Document, left_index, right_index)` is fitz-only: `output.new_page()` + `show_pdf_page()`, sheet from `A4_LANDSCAPE` (841.89 × 595.28 pt), half-width `420.945` splits left/right, `None` side = blank half. **Known mismatch**: `build_booklet()` still creates a pikepdf `Pdf` output and hands it to the fitz helper, so a run dies with `AttributeError: ... no attribute 'new_page'` until the fitz migration is finished in `build_booklet()` (issue #10).
 - `core/verify_booklet.py` — `stamp_page_numbers()` + `verify_booklet(output: Pdf | fitz.Document, order) -> bool`. The `isinstance` branch lets one verifier span the pikepdf pipeline and the PyMuPDF-only migration prototype. Known gap: `build_booklet()` ignores the return value (no non-zero exit on failure yet — issue #9).
 - `utils/format_utils.py` — `zero_padding(n, width=2)` used at **width=4** for stamps and `_check_side()`, but `generate_test_pdf.py` uses the width=2 default for the visible number. Keep stamp and check in sync; the visible number is never matched by the verifier.
+- `utils/constants.py` — `PAGE_WIDTH`/`PAGE_HEIGHT` are portrait A4 (reportlab) for the test PDF; `A4_LANDSCAPE` (841.89 × 595.28) is the shared source for the imposition sheet and the verifier's `HALF_WIDTH`.
 - PyMuPDF's import name is `fitz`. PySide6 is pinned in requirements but nothing imports it yet (UI is planned, issue #2).
 
 ## In-flight work — check GitHub issues first
 
 Issues are the task tracker (`task` label, parent/sub-issue structure; `gh issue list`). Key open items:
 
-- **#10 migration**: pikepdf is being phased out for a PyMuPDF-only pipeline (`page.show_pdf_page()`). A parity-tested prototype exists but is **not committed** — the repo still imposes with pikepdf. Don't add new pikepdf-only code paths; `verify_booklet()`'s isinstance branch becomes fitz-only as part of that commit (decision already made).
+- **#10 migration**: pikepdf is being phased out for a PyMuPDF-only pipeline (`page.show_pdf_page()`). The fitz rewrite of `place_pages_side_by_side()` is committed, but `build_booklet()` still bridges into pikepdf, so the pipeline raises `AttributeError` until it passes fitz documents end-to-end. Don't add new pikepdf-only code paths; `verify_booklet()`'s isinstance branch becomes fitz-only as part of that commit (decision already made).
 - **#9 verification**: core is shipped and wired into `build_booklet()`; open items are failure exit status and a standalone CLI.
 - Known pikepdf-only bugs (scientific-notation content streams, rotated pages) are intentionally left unfixed — resolved by migration, not patched (issue #10).
 
