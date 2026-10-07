@@ -12,51 +12,46 @@ from pikepdf import Array, Dictionary, Name, Object, Page, Pdf, Stream
 from core.calculation import impose
 from core.verify_booklet import stamp_page_numbers, verify_booklet
 
+# ----- Utils Modules -----
+from utils.constants import A4_LANDSCAPE
+
 
 def place_pages_side_by_side(
-    source: Pdf, output: Pdf, left_index: int | None, right_index: int | None
+    source: fitz.Document,
+    output: fitz.Document,
+    left_index: int | None,
+    right_index: int | None,
 ) -> None:
-    """
-    Place two pages side-by-side on a new output page.
+    """Compose one landscape output page from a left and a right source page.
 
-    Extracts pages from the source PDF at the given indices, scales them to fit
-    within half the output page width, and positions them side-by-side on a new
-    output page.
+    Appends a single landscape A4 page (A4_LANDSCAPE) to `output` and
+    treats it as two halves split at half the width. Each side whose index is
+    not None is drawn from `source`, scaled uniformly (aspect ratio preserved)
+    to the largest size that fits inside its half, and centred both
+    horizontally and vertically within that half. A side whose index is None
+    (the sentinel produced by core.calculation.impose for padding pages) is
+    left blank, so the new page may hold one real page, two, or none.
 
     Arguments:
-        source: The source PDF object to read pages from.
-        output: The output PDF object to append the new page to.
-        left_index: Index of the page to place on the left side, or None if blank.
-        right_index: Index of the page to place on the right side, or None if blank.
+        source: Document the pages are copied from.
+        output: Document that receives the new composed page.
+        left_index: 0-based index in `source` for the left half, or None for blank.
+        right_index: 0-based index in `source` for the right half, or None for blank.
     """
-    page_width, page_height = 841.89, 595.28
-    half_width: float = page_width / 2  # half_width = 420.945
+    page_width, page_height = A4_LANDSCAPE
+    half_width: float = page_width / 2
 
-    new_page = Page(
-        Dictionary(
-            Type=Name.Page,
-            MediaBox=Array([0, 0, page_width, page_height]),
-            Resources=Dictionary(XObject=Dictionary()),
-            Contents=Stream(output, b""),
-        )
-    )
-
-    output.pages.append(new_page)
-    page: Page = output.pages[-1]  # get the page we just added
-
-    content_stream = b""
+    new_page: fitz.Page = output.new_page(width=page_width, height=page_height)
 
     for side, index in [("L", left_index), ("R", right_index)]:
         if index is None:
             continue
 
-        source_page: Page = source.pages[index]
-        xobject: Object = Page(source_page).as_form_xobject()
-        page.Resources.XObject[Name(f"/Pg{side}")] = output.copy_foreign(xobject)
+        source_page: fitz.Page = source[index]
+        media: fitz.Rect = source_page.mediabox
 
-        media_box: Array = source_page.mediabox
-        source_width: float = float(media_box[2]) - float(media_box[0])
-        source_height: float = float(media_box[3]) - float(media_box[1])
+        source_width: float = media.width
+        source_height: float = media.height
 
         scale: float = min(half_width / source_width, page_height / source_height)
         scaled_width: float = source_width * scale
@@ -68,11 +63,8 @@ def place_pages_side_by_side(
             x = half_width + (half_width - scaled_width) / 2
         y: float = (page_height - scaled_height) / 2
 
-        content_stream += (
-            f"q " f"{scale} 0 0 {scale} {x} {y} cm " f"/Pg{side} Do " f"Q "
-        ).encode()
-
-    page.Contents = Stream(output, content_stream)
+        dest = fitz.Rect(x, y, x + scaled_width, y + scaled_height)
+        new_page.show_pdf_page(dest, source, index, clip=media)
 
 
 def build_booklet(input_path: str, output_path: str) -> None:
