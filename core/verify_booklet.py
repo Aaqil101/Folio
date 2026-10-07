@@ -3,9 +3,10 @@ import io
 import fitz
 from pikepdf import Pdf
 
+from utils.constants import A4_LANDSCAPE
 from utils.format_utils import zero_padding
 
-PAGE_WIDTH: float = 841.89
+PAGE_WIDTH: float = A4_LANDSCAPE[0]
 HALF_WIDTH: float = PAGE_WIDTH / 2
 STAMP_FONT_SIZE: float = 6.0
 STAMP_RENDER_MODE: int = 3  # Tr 3 — invisible text
