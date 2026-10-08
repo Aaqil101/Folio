@@ -1,7 +1,4 @@
-import io
-
 import fitz
-from pikepdf import Pdf
 
 from utils.constants import A4_LANDSCAPE
 from utils.format_utils import zero_padding
@@ -60,20 +57,7 @@ def _check_side(
     return False
 
 
-def verify_booklet(output: Pdf | fitz.Document, order: list[tuple[int, int]]) -> bool:
-    # Supports both pikepdf.Pdf (current pikepdf-based pipeline) and
-    # fitz.Document (PyMuPDF-only pipeline, in progress) so the same
-    # verifier works against either implementation during the migration.
-    if isinstance(output, Pdf):
-        buf = io.BytesIO()
-        output.save(buf)
-        buf.seek(0)
-        doc = fitz.open(stream=buf.read(), filetype="pdf")
-        opened_here = True
-    else:
-        doc = output
-        opened_here = False
-
+def verify_booklet(output: fitz.Document, order: list[tuple[int, int]]) -> bool:
     total_sheets = len(order)
     passed = 0
     failed = 0
@@ -82,7 +66,7 @@ def verify_booklet(output: Pdf | fitz.Document, order: list[tuple[int, int]]) ->
 
     for sheet_index, (expected_left, expected_right) in enumerate(order):
         sheet_num = sheet_index + 1
-        fitz_page: fitz.Page = doc[sheet_index]
+        fitz_page: fitz.Page = output[sheet_index]
 
         left_found, right_found = _extract_side_numbers(fitz_page, HALF_WIDTH)
 
@@ -93,9 +77,6 @@ def verify_booklet(output: Pdf | fitz.Document, order: list[tuple[int, int]]) ->
             passed += 1
         else:
             failed += 1
-
-    if opened_here:
-        doc.close()
 
     print(f"\nResult: {passed}/{total_sheets} sheets passed, {failed} failed.")
     return failed == 0
