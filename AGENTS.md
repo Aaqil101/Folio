@@ -24,7 +24,7 @@ Folio turns PDFs into print-ready booklets (two-up imposition). Plain Python, no
 
 - `core/calculation.py` — `impose(number_pages)` returns `(left, right)` 1-based page-number pairs. Page count pads to a multiple of 4; `0` is the sentinel for a blank/padding side.
 - `core/booklet_imposition.py` — `build_booklet()`: PyMuPDF stamps every source page with an invisible 4-digit page number (`render_mode=3`, PDF operator `Tr 3`), then imposes and verifies — the whole pipeline is PyMuPDF-only (no `io.BytesIO` bridging; fitz-only `build_booklet()` landed in `1c87042`). The helper `place_pages_side_by_side(source: fitz.Document, output: fitz.Document, left_index, right_index)` is fitz-only: `output.new_page()` + `show_pdf_page()`, sheet from `A4_LANDSCAPE` (841.89 × 595.28 pt), half-width `420.945` splits left/right, `None` side = blank half.
-- `core/verify_booklet.py` — `stamp_page_numbers()` + `verify_booklet(output: Pdf | fitz.Document, order) -> bool`. The `isinstance` branch is a migration leftover: `build_booklet()` now passes a `fitz.Document`, so the pikepdf branch is dead code pending removal as part of issue #10. Known gap: `build_booklet()` ignores the return value (no non-zero exit on failure yet — issue #9).
+- `core/verify_booklet.py` — `stamp_page_numbers()` + `verify_booklet(output: fitz.Document, order) -> bool` — fitz-only; the migration-era `isinstance` branch and its `io`/`pikepdf` imports are gone, and pikepdf is out of `requirements.txt` (`450cef8`). Known gap: `build_booklet()` ignores the return value (no non-zero exit on failure yet — issue #9).
 - `utils/format_utils.py` — `zero_padding(n, width=2)` used at **width=4** for stamps and `_check_side()`, but `generate_test_pdf.py` uses the width=2 default for the visible number. Keep stamp and check in sync; the visible number is never matched by the verifier.
 - `utils/constants.py` — `PAGE_WIDTH`/`PAGE_HEIGHT` are portrait A4 (reportlab) for the test PDF; `A4_LANDSCAPE` (841.89 × 595.28) is the shared source for the imposition sheet and the verifier's `HALF_WIDTH`.
 - PyMuPDF's import name is `fitz`. PySide6 is pinned in requirements but nothing imports it yet (UI is planned, issue #2).
@@ -33,7 +33,7 @@ Folio turns PDFs into print-ready booklets (two-up imposition). Plain Python, no
 
 Issues are the task tracker (`task` label, parent/sub-issue structure; `gh issue list`). Key open items:
 
-- **#10 migration**: pikepdf is being phased out for a PyMuPDF-only pipeline (`page.show_pdf_page()`). The fitz rewrite of `place_pages_side_by_side()` (`aae11ed`) and the fitz-only `build_booklet()` (`1c87042`) are committed — no new pikepdf-only code paths. Remaining: simplify `verify_booklet()` to fitz-only (drop the isinstance branch and its `io`/`pikepdf` imports — decision already made) and remove pikepdf from `requirements.txt`.
+- **#10 migration**: pikepdf is fully out — PyMuPDF-only pipeline (`page.show_pdf_page()`): `place_pages_side_by_side()` (`aae11ed`), fitz-only `build_booklet()` (`1c87042`), fitz-only `verify_booklet()` + pikepdf unpinned from `requirements.txt` (`450cef8`). Remaining before closing: test-suite updates and open-gap validation (encrypted PDFs etc. — see the issue).
 - **#9 verification**: core is shipped and wired into `build_booklet()`; open items are failure exit status and a standalone CLI.
 - The old pikepdf-only bugs (scientific-notation content streams, rotated pages) were resolved by the migration, not patched (issue #10).
 
