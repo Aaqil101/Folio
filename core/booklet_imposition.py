@@ -1,12 +1,8 @@
 # ----- Built-In Modules -----
-import io
 import shlex
 
 # ----- PyMuPDF Modules -----
 import fitz
-
-# ----- PikePDF Modules -----
-from pikepdf import Array, Dictionary, Name, Object, Page, Pdf, Stream
 
 # ----- Core Modules -----
 from core.calculation import impose
@@ -80,18 +76,14 @@ def build_booklet(input_path: str, output_path: str) -> None:
         output_path: Path where the imposed PDF will be saved.
     """
 
-    fitz_doc = fitz.open(input_path)
-    stamp_page_numbers(fitz_doc)
-    stamped_bytes = fitz_doc.tobytes()
-    fitz_doc.close()
+    source: fitz.Document = fitz.open(input_path)
+    stamp_page_numbers(source)
 
-    source: Pdf = Pdf.open(io.BytesIO(stamped_bytes))
-
-    page_numbers: int = len(source.pages)
+    page_numbers: int = len(source)
     order: list[tuple[int, int]] = impose(page_numbers)
     print(order)
 
-    output: Pdf = Pdf.new()  # ONE PDF object for everything
+    output: fitz.Document = fitz.open()  # ONE PDF object for everything
 
     for left_page, right_page in order:
         left_index: int | None = left_page - 1 if left_page else None
@@ -104,6 +96,8 @@ def build_booklet(input_path: str, output_path: str) -> None:
 
     verify_booklet(output, order)
     output.save(output_path)
+    source.close()
+    output.close()
     print("Booklet saved to:", output_path)
 
 
