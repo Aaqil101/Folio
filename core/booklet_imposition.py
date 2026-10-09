@@ -77,6 +77,14 @@ def build_booklet(input_path: str, output_path: str) -> None:
     """
 
     source: fitz.Document = fitz.open(input_path)
+    if source.needs_pass:
+        source.close()
+        raise ValueError(
+            f"Source PDF is password-protected and cannot be imposed: {input_path}"
+        )
+    for page in source:
+        if page.rotation:
+            page.set_rotation(0)
     stamp_page_numbers(source)
 
     page_numbers: int = len(source)
