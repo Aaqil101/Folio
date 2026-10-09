@@ -1,5 +1,9 @@
+import argparse
+import sys
+
 import fitz
 
+from core.calculation import impose
 from utils.constants import A4_LANDSCAPE
 from utils.format_utils import zero_padding
 
@@ -84,3 +88,29 @@ def verify_booklet(output: fitz.Document, order: list[tuple[int, int]]) -> bool:
 
     print(f"\nResult: {passed}/{total_sheets} sheets passed, {failed} failed.")
     return failed == 0
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="Verify a booklet-imposed PDF against its source document."
+    )
+    parser.add_argument("source", help="Original (pre-imposition) PDF.")
+    parser.add_argument("booklet", help="Imposed booklet PDF to verify.")
+    args: argparse.Namespace = parser.parse_args()
+
+    source: fitz.Document = fitz.open(args.source)
+    if source.needs_pass:
+        source.close()
+        parser.error(f"source PDF is password-protected: {args.source}")
+    order: list[tuple[int, int]] = impose(len(source))
+    source.close()
+
+    booklet: fitz.Document = fitz.open(args.booklet)
+    if not verify_booklet(booklet, order):
+        booklet.close()
+        raise SystemExit(1)
+    booklet.close()
+
+
+if __name__ == "__main__":
+    main()
