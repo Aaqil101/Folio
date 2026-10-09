@@ -6,7 +6,11 @@ import fitz
 
 # ----- Core Modules -----
 from core.calculation import impose
-from core.verify_booklet import stamp_page_numbers, verify_booklet
+from core.verify_booklet import (
+    BookletVerificationError,
+    stamp_page_numbers,
+    verify_booklet,
+)
 
 # ----- Utils Modules -----
 from utils.constants import A4_LANDSCAPE
@@ -74,6 +78,11 @@ def build_booklet(input_path: str, output_path: str) -> None:
     Arguments:
         input_path: Path to the source PDF file.
         output_path: Path where the imposed PDF will be saved.
+
+    Raises:
+        ValueError: The source is password-protected.
+        BookletVerificationError: The imposed sheets failed stamp
+            verification; nothing is written to output_path.
     """
 
     source: fitz.Document = fitz.open(input_path)
@@ -102,7 +111,12 @@ def build_booklet(input_path: str, output_path: str) -> None:
         # so the helper can read pages from `source` and append new pages to `output`.
         place_pages_side_by_side(source, output, left_index, right_index)
 
-    verify_booklet(output, order)
+    if not verify_booklet(output, order):
+        source.close()
+        output.close()
+        raise BookletVerificationError(
+            f"Verification failed for {page_numbers} pages; booklet not saved."
+        )
     output.save(output_path)
     source.close()
     output.close()
@@ -112,4 +126,8 @@ def build_booklet(input_path: str, output_path: str) -> None:
 if __name__ == "__main__":
     paths: list[str] = shlex.split(input("Provide the input and output paths: "))
     input_path, output_path = paths[0], paths[1]
-    build_booklet(input_path, output_path)
+    try:
+        build_booklet(input_path, output_path)
+    except (ValueError, BookletVerificationError) as error:
+        print(f"FAILED  {error}")
+        raise SystemExit(1)

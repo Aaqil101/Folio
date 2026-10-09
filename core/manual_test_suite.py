@@ -20,7 +20,11 @@ import fitz
 from core.booklet_imposition import build_booklet
 from core.calculation import impose
 from core.generate_test_pdf import generate_test_pdf
-from core.verify_booklet import stamp_page_numbers, verify_booklet
+from core.verify_booklet import (
+    BookletVerificationError,
+    stamp_page_numbers,
+    verify_booklet,
+)
 
 # ----- Utils Modules -----
 from utils.constants import A4_LANDSCAPE, PAGE_HEIGHT, PAGE_WIDTH
@@ -584,6 +588,13 @@ def run_suite(
             status = "ERROR"
             verify_cell = str(error)
             print(f"ERROR  {src.name}: {type(error).__name__}: {error}")
+        except BookletVerificationError as error:
+            elapsed = time.perf_counter() - start
+            failures += 1
+            status = "FAIL"
+            verify_cell = "FAIL"
+            geom_cell = "n/a"
+            print(f"VERIFY FAIL  {src.name}: {error}")
         except Exception as error:
             elapsed = time.perf_counter() - start
             failures += 1

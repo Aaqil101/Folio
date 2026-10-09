@@ -9,6 +9,10 @@ STAMP_FONT_SIZE: float = 6.0
 STAMP_RENDER_MODE: int = 3  # Tr 3 — invisible text
 
 
+class BookletVerificationError(RuntimeError):
+    """Raised when an imposed booklet fails stamp verification."""
+
+
 def stamp_page_numbers(source: fitz.Document) -> None:
     for index, page in enumerate(source, start=1):
         media = page.mediabox
