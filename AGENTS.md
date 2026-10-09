@@ -9,6 +9,7 @@ Folio turns PDFs into print-ready booklets (two-up imposition). Plain Python, no
 - Environment: `.venv` (Python 3.14.7). Install deps with `pip install -r requirements.txt` (fully pinned).
 - Always run from the repo root as modules — imports are package-absolute (`from core.calculation import impose`), so `python core/booklet_imposition.py` fails; use `python -m core.<module>`:
   - `python -m core.generate_test_pdf --help` — argparse CLI that builds numbered test PDFs (reportlab).
+  - `python -m core.generate_test_images --help` — argparse CLI that builds numbered test images (Pillow) in batches under `test_pdfs/images/<folder>/`; the counterpart to `generate_test_pdf`, test input for image support (issue #7).
   - `python -m core.booklet_imposition` — interactive: one prompt for both paths, shlex-split (e.g. `"in.pdf" "out.pdf"`). Stamps → imposes → verifies → saves.
   - `python -m core.calculation` — interactive: prints the imposition order for a page count.
   - `python -m core.verify_booklet SOURCE BOOKLET` — argparse CLI: re-derives the order from the source and verifies the imposed booklet. Exit 0 all pass, 1 any FAIL, 2 bad args / passworded source.
