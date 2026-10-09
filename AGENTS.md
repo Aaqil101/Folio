@@ -11,9 +11,10 @@ Folio turns PDFs into print-ready booklets (two-up imposition). Plain Python, no
   - `python -m core.generate_test_pdf --help` — argparse CLI that builds numbered test PDFs (reportlab).
   - `python -m core.booklet_imposition` — interactive: one prompt for both paths, shlex-split (e.g. `"in.pdf" "out.pdf"`). Stamps → imposes → verifies → saves.
   - `python -m core.calculation` — interactive: prints the imposition order for a page count.
+  - `python -m core.verify_booklet SOURCE BOOKLET` — argparse CLI: re-derives the order from the source and verifies the imposed booklet. Exit 0 all pass, 1 any FAIL, 2 bad args / passworded source.
   - `python -m core.manual_test_suite` — runs the by-eye suite: builds synthetic inputs, imposes every PDF in `test_pdfs/inputs/` (synthetic + real), writes outputs and a checklist to `test_pdfs/`. Flags: `--quick` (≤200-page inputs, 12-sheet geometry sample), `--regen` (rebuild synthetic inputs), `--only SUBSTRING`, `--offline`, `--no-geometry`, `--sample N` (geometry sheet sample; 0 = every sheet, default 48), `--force` (bypass cache), `--list` (dry run). Missing real PDFs auto-download (retried, `%PDF`-validated). Beyond `build_booklet()`'s stamp verification it pixel-diffs each output against an independently rebuilt expected imposition (geometry oracle; sampled at 48 sheets for big files), and an oracle canary first proves the check can fail. Results are cached in `test_pdfs/run_cache.json` keyed on input mtime + code hash + sample size; failures dump PNG/log artifacts to `test_pdfs/failures/<stem>/`. Prints a summary table; exits non-zero on failures.
 - No lint, typecheck, or test framework exists. "Testing" = manual script runs checked by eye: `print(order)`, then `Verifying N sheets...`, per-sheet `FAIL` lines, and `Result: X/Y sheets passed`. **Do not introduce pytest/unittest or new tooling unless asked** — this is a deliberate project convention (GitHub issues #9/#10).
-- Verification output comes from `build_booklet()` itself; `verify_booklet.py` has no CLI.
+- Verification runs inside `build_booklet()`, which raises `BookletVerificationError` on failure (nothing is written); `verify_booklet.py` also has a standalone CLI.
 
 ## Commits
 
@@ -25,7 +26,7 @@ Folio turns PDFs into print-ready booklets (two-up imposition). Plain Python, no
 
 - `core/calculation.py` — `impose(number_pages)` returns `(left, right)` 1-based page-number pairs. Page count pads to a multiple of 4; `0` is the sentinel for a blank/padding side.
 - `core/booklet_imposition.py` — `build_booklet()`: rejects passworded sources (`needs_pass` guard), clears `/Rotate` flags first (`page.set_rotation(0)` — stored content is imposed as-is, labels align across halves; `show_pdf_page()` mishandles sources that still carry rotation, shifting and clipping them), stamps every source page with an invisible 4-digit page number (`render_mode=3`, PDF operator `Tr 3`), then imposes and verifies — the whole pipeline is PyMuPDF-only (no `io.BytesIO` bridging; fitz-only `build_booklet()` landed in `1c87042`). The helper `place_pages_side_by_side(source: fitz.Document, output: fitz.Document, left_index, right_index)` is fitz-only: `output.new_page()` + `show_pdf_page()`, sheet from `A4_LANDSCAPE` (841.89 × 595.28 pt), half-width `420.945` splits left/right, `None` side = blank half.
-- `core/verify_booklet.py` — `stamp_page_numbers()` + `verify_booklet(output: fitz.Document, order) -> bool` — fitz-only; the migration-era `isinstance` branch and its `io`/`pikepdf` imports are gone, and pikepdf is out of `requirements.txt` (`450cef8`). Known gap: `build_booklet()` ignores the return value (no non-zero exit on failure yet — issue #9).
+- `core/verify_booklet.py` — `stamp_page_numbers()` + `verify_booklet(output: fitz.Document, order) -> bool`, plus `BookletVerificationError` and a standalone CLI (`python -m core.verify_booklet SOURCE BOOKLET`). fitz-only; the migration-era `isinstance` branch and its `io`/`pikepdf` imports are gone, and pikepdf is out of `requirements.txt` (`450cef8`). `build_booklet()` raises instead of ignoring a failed verification (issue #9).
 - `core/manual_test_suite.py` — the by-eye test suite (issue #10): generates synthetic inputs (odd/even, rotated, mixed sizes, asymmetric, annotations, encrypted, 500-page stress), auto-downloads the real corpus, imposes everything under `test_pdfs/inputs/`, outputs to `test_pdfs/outputs/`, and validates each output with an independent geometry oracle (rebuild expected sheets from the input, pixel-diff vs actual; >10% content diff = fail). An oracle canary (impose → assert pass, blacken a sheet → assert fail) runs before the suite so a dead check can't mask regressions. Run results cache in `test_pdfs/run_cache.json` (input size/mtime + sha of the core sources); `--force` re-runs, `--list` previews. Failure artifacts land in `test_pdfs/failures/<stem>/` (actual/expected/diff PNGs, `verify.log`). `show_pdf_page()` drops annotations/bookmarks by design; passworded inputs are rejected via a `needs_pass` guard in `build_booklet()`.
 - `utils/format_utils.py` — `zero_padding(n, width=2)` used at **width=4** for stamps and `_check_side()`, but `generate_test_pdf.py` uses the width=2 default for the visible number. Keep stamp and check in sync; the visible number is never matched by the verifier.
 - `utils/constants.py` — `PAGE_WIDTH`/`PAGE_HEIGHT` are portrait A4 (reportlab) for the test PDF; `A4_LANDSCAPE` (841.89 × 595.28) is the shared source for the imposition sheet and the verifier's `HALF_WIDTH`.
@@ -33,11 +34,11 @@ Folio turns PDFs into print-ready booklets (two-up imposition). Plain Python, no
 
 ## In-flight work — check GitHub issues first
 
-Issues are the task tracker (`task` label, parent/sub-issue structure; `gh issue list`). Key open items:
+Issues are the task tracker (`task` label, parent/sub-issue structure; `gh issue list`). Recent state:
 
-- **#10 migration**: pikepdf is fully out — PyMuPDF-only pipeline (`page.show_pdf_page()`): `place_pages_side_by_side()` (`aae11ed`), fitz-only `build_booklet()` (`1c87042`), fitz-only `verify_booklet()` + pikepdf unpinned from `requirements.txt` (`450cef8`). Test suite and open-gap validation are done (`core/manual_test_suite.py`, results in the issue); remaining before closing: visual eyeball pass over `test_pdfs/outputs/` per `test_pdfs/CHECKLIST.md`.
-- **#9 verification**: core is shipped and wired into `build_booklet()`; open items are failure exit status and a standalone CLI.
-- The old pikepdf-only bugs (scientific-notation content streams, rotated pages) were resolved by the migration, not patched (issue #10).
+- **#9 verification** — closed: `build_booklet()` now raises `BookletVerificationError` on a failed check (nothing saved, CLI exits 1), and `verify_booklet.py` has a standalone CLI taking source + booklet.
+- **#10 migration** — closed: pikepdf is fully out (`aae11ed`, `1c87042`, `450cef8`); `core/manual_test_suite.py` covers the corpus, the geometry oracle caught nothing new, and the eyeball pass over `test_pdfs/outputs/` is done.
+- The old pikepdf-only bugs (scientific-notation content streams, rotated pages) were resolved by the migration, not patched.
 
 ## Docs live outside this repo
 
