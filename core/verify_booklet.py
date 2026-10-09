@@ -1,12 +1,17 @@
+# ----- Built-In Modules -----
 import argparse
-import sys
 
+# ----- PyMuPDF Modules -----
 import fitz
 
+# ----- Core Modules -----
 from core.calculation import impose
+
+# ----- Utils Modules-----
 from utils.constants import A4_LANDSCAPE
 from utils.format_utils import zero_padding
 
+# ----- Module-Level Constants -----
 PAGE_WIDTH: float = A4_LANDSCAPE[0]
 HALF_WIDTH: float = PAGE_WIDTH / 2
 STAMP_FONT_SIZE: float = 6.0
@@ -73,12 +78,12 @@ def verify_booklet(output: fitz.Document, order: list[tuple[int, int]]) -> bool:
     print(f"\nVerifying {total_sheets} sheets...")
 
     for sheet_index, (expected_left, expected_right) in enumerate(order):
-        sheet_num = sheet_index + 1
+        sheet_num: int = sheet_index + 1
         fitz_page: fitz.Page = output[sheet_index]
 
         left_found, right_found = _extract_side_numbers(fitz_page, HALF_WIDTH)
 
-        left_ok = _check_side(sheet_num, "LEFT ", expected_left, left_found)
+        left_ok: bool = _check_side(sheet_num, "LEFT ", expected_left, left_found)
         right_ok = _check_side(sheet_num, "RIGHT", expected_right, right_found)
 
         if left_ok and right_ok:
