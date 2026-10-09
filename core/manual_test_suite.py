@@ -27,9 +27,8 @@ from core.verify_booklet import (
 )
 
 # ----- Utils Modules -----
-from utils.constants import A4_LANDSCAPE, PAGE_HEIGHT, PAGE_WIDTH
+from utils.constants import A4_LANDSCAPE, PAGE_HEIGHT, PAGE_WIDTH, REPO_ROOT
 
-REPO_ROOT: Path = Path(__file__).resolve().parent.parent
 SYNTHETIC_DIR: Path = REPO_ROOT / "test_pdfs" / "inputs" / "synthetic"
 REAL_DIR: Path = REPO_ROOT / "test_pdfs" / "inputs" / "real"
 OUTPUT_DIR: Path = REPO_ROOT / "test_pdfs" / "outputs"
@@ -297,9 +296,7 @@ def _load_cache() -> dict:
 
 def _save_cache(cache: dict) -> None:
     CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    CACHE_PATH.write_text(
-        json.dumps(cache, indent=2, sort_keys=True), encoding="utf-8"
-    )
+    CACHE_PATH.write_text(json.dumps(cache, indent=2, sort_keys=True), encoding="utf-8")
 
 
 def _cache_entry(src: Path, cache: dict) -> dict | None:
@@ -338,9 +335,7 @@ def _cache_hit(
 def _sampled_sheet_indices(total: int, sample: int) -> list[int]:
     if total <= sample:
         return list(range(total))
-    return sorted(
-        {round(k * (total - 1) / (sample - 1)) for k in range(sample)}
-    )
+    return sorted({round(k * (total - 1) / (sample - 1)) for k in range(sample)})
 
 
 def _expected_sheet(
@@ -434,12 +429,12 @@ def geometry_check(
             failures.append(f"sheet {index + 1}: missing in output")
             continue
         expected: fitz.Document = _expected_sheet(source, left_page, right_page)
-        actual_gray: bytes = output[index].get_pixmap(
-            dpi=GEOM_DPI, colorspace=fitz.csGRAY
-        ).samples
-        expected_gray: bytes = expected[0].get_pixmap(
-            dpi=GEOM_DPI, colorspace=fitz.csGRAY
-        ).samples
+        actual_gray: bytes = (
+            output[index].get_pixmap(dpi=GEOM_DPI, colorspace=fitz.csGRAY).samples
+        )
+        expected_gray: bytes = (
+            expected[0].get_pixmap(dpi=GEOM_DPI, colorspace=fitz.csGRAY).samples
+        )
         ratio: float = _content_diff_ratio(actual_gray, expected_gray)
         worst = max(worst, ratio)
         if ratio > GEOM_DIFF_MAX:
@@ -500,9 +495,7 @@ def _oracle_canary() -> None:
         if not ok:
             raise RuntimeError(f"pristine output failed the oracle: {message}")
         document: fitz.Document = fitz.open(str(dst))
-        document[0].draw_rect(
-            document[0].rect, color=(0, 0, 0), fill=(0, 0, 0)
-        )
+        document[0].draw_rect(document[0].rect, color=(0, 0, 0), fill=(0, 0, 0))
         document.save(str(tampered))
         document.close()
         ok, message = geometry_check(src, tampered, artifacts=False)
@@ -546,9 +539,8 @@ def run_suite(
         sheets: int = (pages + 3) // 4
 
         entry: dict | None = _cache_entry(src, cache)
-        cache_hit: bool = (
-            not force
-            and _cache_hit(entry, code_fp, src, dst, geometry, geom_sample)
+        cache_hit: bool = not force and _cache_hit(
+            entry, code_fp, src, dst, geometry, geom_sample
         )
 
         print("=" * 70)
@@ -560,9 +552,19 @@ def run_suite(
             verify_cell: str = str(entry.get("verify", "-"))
             geom_cell: str = str(entry.get("geometry", "-"))
             rows.append(
-                (src.name, str(pages), str(sheets), verify_cell, geom_cell, "-", "cached")
+                (
+                    src.name,
+                    str(pages),
+                    str(sheets),
+                    verify_cell,
+                    geom_cell,
+                    "-",
+                    "cached",
+                )
             )
-            print(f"cached (unchanged since last run; verify {verify_cell}, geometry {geom_cell})")
+            print(
+                f"cached (unchanged since last run; verify {verify_cell}, geometry {geom_cell})"
+            )
             print()
             continue
 
@@ -580,7 +582,15 @@ def run_suite(
             if needs_pass:
                 print(f"REJECTED  {src.name}: {error}  ({elapsed:.1f}s)")
                 rows.append(
-                    (src.name, str(pages), str(sheets), "rejected", "-", f"{elapsed:.1f}s", "REJECTED")
+                    (
+                        src.name,
+                        str(pages),
+                        str(sheets),
+                        "rejected",
+                        "-",
+                        f"{elapsed:.1f}s",
+                        "REJECTED",
+                    )
                 )
                 print()
                 continue
@@ -624,7 +634,15 @@ def run_suite(
             print(f"{status}  {src.name} -> {dst.name}  ({elapsed:.1f}s)")
 
         rows.append(
-            (src.name, str(pages), str(sheets), verify_cell, geom_cell, f"{elapsed:.1f}s", status)
+            (
+                src.name,
+                str(pages),
+                str(sheets),
+                verify_cell,
+                geom_cell,
+                f"{elapsed:.1f}s",
+                status,
+            )
         )
         if status == "OK":
             cache[src.name] = {
@@ -643,7 +661,9 @@ def run_suite(
         _save_cache(cache)
 
     print("=" * 120)
-    print(f"{'input':32s} {'pages':>6} {'sheets':>7} {'verify':>8} {'geometry':45s} {'time':>7}  status")
+    print(
+        f"{'input':32s} {'pages':>6} {'sheets':>7} {'verify':>8} {'geometry':45s} {'time':>7}  status"
+    )
     for row in rows:
         print(
             f"{row[0]:32.32s} {row[1]:>6} {row[2]:>7} {row[3]:>8} "
@@ -659,9 +679,7 @@ def run_suite(
     return failures
 
 
-def run_list(
-    quick: bool, only: str | None, geometry: bool, sample: int | None
-) -> int:
+def run_list(quick: bool, only: str | None, geometry: bool, sample: int | None) -> int:
     inputs: list[Path] = collect_inputs(quick, only)
     if not inputs:
         print("No inputs matched.")
@@ -683,7 +701,9 @@ def run_list(
         print(
             f"{state:7s} {src.name:32.32s} {str(pages if pages is not None else '?'):>6} pages"
         )
-    print(f"{len(inputs)} input(s), {planned} would run, {len(inputs) - planned} cached")
+    print(
+        f"{len(inputs)} input(s), {planned} would run, {len(inputs) - planned} cached"
+    )
     return 0
 
 
