@@ -219,3 +219,7 @@ __marimo__/
 
 # Generated PDF files
 *.pdf
+
+# Folio manual test-suite state (per-machine)
+test_pdfs/run_cache.json
+test_pdfs/failures/
