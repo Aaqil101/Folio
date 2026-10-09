@@ -1,5 +1,6 @@
 # ----- Built-In Modules -----
 import argparse
+import sys
 
 # ----- ReportLab Modules -----
 from reportlab.pdfgen import canvas
@@ -76,6 +77,9 @@ def generate_test_pdf(
 
 
 def main() -> None:
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")
+
     parser = argparse.ArgumentParser(
         description="Generate a numbered test PDF for Folio imposition testing."
     )
