@@ -70,10 +70,15 @@ def _check_side(
     return False
 
 
-def verify_booklet(output: fitz.Document, order: list[tuple[int, int]]) -> bool:
+def verify_booklet(
+    output: fitz.Document,
+    order: list[tuple[int, int]],
+    sheet_size: tuple[float, float] = A4_LANDSCAPE,
+) -> bool:
     total_sheets = len(order)
     passed = 0
     failed = 0
+    half_width: float = sheet_size[0] / 2
 
     print(f"\nVerifying {total_sheets} sheets...")
 
@@ -81,7 +86,7 @@ def verify_booklet(output: fitz.Document, order: list[tuple[int, int]]) -> bool:
         sheet_num: int = sheet_index + 1
         fitz_page: fitz.Page = output[sheet_index]
 
-        left_found, right_found = _extract_side_numbers(fitz_page, HALF_WIDTH)
+        left_found, right_found = _extract_side_numbers(fitz_page, half_width)
 
         left_ok: bool = _check_side(sheet_num, "LEFT ", expected_left, left_found)
         right_ok = _check_side(sheet_num, "RIGHT", expected_right, right_found)

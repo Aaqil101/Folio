@@ -21,24 +21,27 @@ def place_pages_side_by_side(
     output: fitz.Document,
     left_index: int | None,
     right_index: int | None,
+    sheet_size: tuple[float, float] = A4_LANDSCAPE,
 ) -> None:
     """Compose one landscape output page from a left and a right source page.
 
-    Appends a single landscape A4 page (A4_LANDSCAPE) to `output` and
-    treats it as two halves split at half the width. Each side whose index is
-    not None is drawn from `source`, scaled uniformly (aspect ratio preserved)
-    to the largest size that fits inside its half, and centred both
-    horizontally and vertically within that half. A side whose index is None
-    (the sentinel produced by core.calculation.impose for padding pages) is
-    left blank, so the new page may hold one real page, two, or none.
+    Appends a single landscape page (sheet_size, default A4_LANDSCAPE) to
+    `output` and treats it as two halves split at half the width. Each side
+    whose index is not None is drawn from `source`, scaled uniformly (aspect
+    ratio preserved) to the largest size that fits inside its half, and
+    centred both horizontally and vertically within that half. A side whose
+    index is None (the sentinel produced by core.calculation.impose for
+    padding pages) is left blank, so the new page may hold one real page,
+    two, or none.
 
     Arguments:
         source: Document the pages are copied from.
         output: Document that receives the new composed page.
         left_index: 0-based index in `source` for the left half, or None for blank.
         right_index: 0-based index in `source` for the right half, or None for blank.
+        sheet_size: (width, height) of the landscape output sheet.
     """
-    page_width, page_height = A4_LANDSCAPE
+    page_width, page_height = sheet_size
     half_width: float = page_width / 2
 
     new_page: fitz.Page = output.new_page(width=page_width, height=page_height)
@@ -67,7 +70,11 @@ def place_pages_side_by_side(
         new_page.show_pdf_page(dest, source, index, clip=media)
 
 
-def build_booklet(input_path: str, output_path: str) -> None:
+def build_booklet(
+    input_path: str,
+    output_path: str,
+    sheet_size: tuple[float, float] = A4_LANDSCAPE,
+) -> None:
     """
     Create a booklet-imposed PDF from an input PDF file.
 
@@ -78,6 +85,7 @@ def build_booklet(input_path: str, output_path: str) -> None:
     Arguments:
         input_path: Path to the source PDF file.
         output_path: Path where the imposed PDF will be saved.
+        sheet_size: (width, height) of the landscape output sheet.
 
     Raises:
         ValueError: The source is password-protected.
@@ -107,11 +115,12 @@ def build_booklet(input_path: str, output_path: str) -> None:
         right_index: int | None = right_page - 1 if right_page else None
 
         # Delegates the actual PDF construction work to the helper function.
-        # Passes both the source document (`source`) and the output document (`output`)
-        # so the helper can read pages from `source` and append new pages to `output`.
-        place_pages_side_by_side(source, output, left_index, right_index)
+        # Passes the source document (`source`), the output document (`output`)
+        # and the chosen sheet size so the helper can read pages from `source`
+        # and append new pages to `output`.
+        place_pages_side_by_side(source, output, left_index, right_index, sheet_size)
 
-    if not verify_booklet(output, order):
+    if not verify_booklet(output, order, sheet_size):
         source.close()
         output.close()
         raise BookletVerificationError(
