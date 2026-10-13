@@ -1,0 +1,72 @@
+<!DOCTYPE RCC>
+<RCC version="1.0">
+    <qresource prefix="/">
+        <!-- Application Icons -->
+        <file>assets/application/folio.svg</file>
+
+        <!-- File Dialog Icons -->
+        <file>assets/file-dialog/folder_add.svg</file>
+        <file>assets/file-dialog/grid_view.svg</file>
+        <file>assets/file-dialog/list_view.svg</file>
+        <file>assets/file-dialog/navigate_back.svg</file>
+        <file>assets/file-dialog/navigate_forward.svg</file>
+        <file>assets/file-dialog/up_arrow.svg</file>
+
+        <!-- PopUp Icons -->
+        <file>assets/popup/check.svg</file>
+        <file>assets/popup/error.svg</file>
+        <file>assets/popup/exclamation.svg</file>
+        <file>assets/popup/info.svg</file>
+
+        <!-- Check Icons -->
+        <file>assets/square_check.svg</file>
+        <file>assets/square_check_filled.svg</file>
+        <file>assets/check_outline.svg</file>
+        <file>assets/check_bold.svg</file>
+        <file>assets/check_all.svg</file>
+
+        <!-- Expand Icons -->
+        <file>assets/expand_less.svg</file>
+        <file>assets/expand_more.svg</file>
+
+        <!-- Settings Icons -->
+        <file>assets/settings.svg</file>
+        <file>assets/settings_outline.svg</file>
+        <file>assets/settings_advanced.svg</file>
+
+        <!-- Cancel Icons -->
+        <file>assets/cancel.svg</file>
+        <file>assets/cancel_outline.svg</file>
+
+        <!-- Save Icons -->
+        <file>assets/save_outline.svg</file>
+        <file>assets/save_filled.svg</file>
+        <file>assets/save_check_filled.svg</file>
+
+        <!-- Folder Icons -->
+        <file>assets/folder.svg</file>
+        <file>assets/folder_outline.svg</file>
+        <file>assets/folder_open.svg</file>
+
+        <!-- Trash Icons -->
+        <file>assets/trash.svg</file>
+        <file>assets/trash_blank.svg</file>
+        <file>assets/trash_outline.svg</file>
+
+        <!-- Icons -->
+        <file>assets/about.svg</file>
+        <file>assets/log.svg</file>
+        <file>assets/edit.svg</file>
+        <file>assets/exit.svg</file>
+        <file>assets/refresh.svg</file>
+        <file>assets/file.svg</file>
+        <file>assets/file_filled.svg</file>
+        <file>assets/exclude.svg</file>
+        <file>assets/home.svg</file>
+        <file>assets/search.svg</file>
+
+        <!-- Fonts -->
+        <file>assets/fonts/OpenSans-SemiBold.ttf</file>
+        <file>assets/fonts/LICENSE.txt</file>
+    </qresource>
+</RCC>
