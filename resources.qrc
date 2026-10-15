@@ -64,6 +64,10 @@
         <file>assets/exclude.svg</file>
         <file>assets/home.svg</file>
         <file>assets/search.svg</file>
+        <file>assets/view_list.svg</file>
+        <file>assets/view_thumbnail.svg</file>
+        <file>assets/move_left.svg</file>
+        <file>assets/move_right.svg</file>
 
         <!-- Fonts -->
         <file>assets/fonts/OpenSans-SemiBold.ttf</file>

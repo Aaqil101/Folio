@@ -113,6 +113,80 @@ def qss() -> str:
         font-size: 10pt;
     }}
 
+    /* --- Image Set Table (reorder dialog) --- */
+    #ImageSetTable {{
+        background-color: {THEME_BG_SECONDARY};
+        alternate-background-color: {THEME_BG_PRIMARY};
+        color: {THEME_TEXT_PRIMARY};
+        border: 1px solid #323232;
+        outline: 0;
+    }}
+    #ImageSetTable::item {{
+        padding: 4px 8px;
+        border: none;
+    }}
+    #ImageSetTable::item:hover {{
+        background-color: {accent['hover_background']};
+    }}
+    #ImageSetTable::item:selected {{
+        background-color: {accent['main_background']};
+        color: {THEME_TEXT_PRIMARY};
+        border-left: 2px solid {accent['border']};
+    }}
+    #ImageSetTable::item:selected:!active {{
+        background-color: {accent['main_background']};
+    }}
+    #ImageSetTable QHeaderView::section {{
+        background-color: {THEME_BG_SECONDARY};
+        color: {THEME_TEXT_SECONDARY};
+        border: none;
+        border-bottom: 1px solid #323232;
+        padding: 6px 8px;
+        font-size: 10pt;
+    }}
+
+    /* --- Image Set Grid (thumbnail view) --- */
+    #ImageSetGrid {{
+        background-color: {THEME_BG_SECONDARY};
+        border: 1px solid #323232;
+        outline: 0;
+    }}
+    #ImageSetGrid::item {{
+        background-color: {THEME_BG_PRIMARY};
+        border: 1px solid transparent;
+        border-radius: 4px;
+        padding: 4px;
+    }}
+    #ImageSetGrid::item:hover {{
+        background-color: {accent['hover_background']};
+    }}
+    #ImageSetGrid::item:selected {{
+        background-color: {accent['main_background']};
+        border: 1px solid {accent['border']};
+    }}
+    #ImageSetGrid::item:selected:!active {{
+        background-color: {accent['main_background']};
+    }}
+
+    /* --- Image set view toggle (list / thumbnails) --- */
+    QToolButton[ViewToggle="true"] {{
+        background-color: transparent;
+        border: 1px solid #323232;
+        border-radius: 4px;
+        padding: 3px;
+    }}
+    QToolButton[ViewToggle="true"]:hover {{
+        background-color: {accent['hover_background']};
+        border: 1px solid {accent['border']};
+    }}
+    QToolButton[ViewToggle="true"]:checked {{
+        background-color: {accent['main_background']};
+        border: 1px solid {accent['border']};
+    }}
+    QToolButton[ViewToggle="true"]:pressed {{
+        background-color: {accent['pressed_background']};
+    }}
+
     /* Empty state placeholder (overlay label on the table viewport) */
     #EmptyStateLabel {{
         color: #828282;
