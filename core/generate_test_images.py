@@ -35,6 +35,19 @@ FORMAT_EXTENSIONS: dict[str, str] = {
     "tiff": "tiff",
 }
 DPI_FORMATS: frozenset[str] = frozenset({"png", "jpg", "jpeg", "tiff"})
+EXIF_FORMATS: frozenset[str] = frozenset({"jpg", "jpeg"})
+
+# EXIF tag 0x0112 (orientation) and the pre-rotation that pairs with each
+# supported value: stored pixels are rotated the *inverse* way so that
+# ImageOps.exif_transpose() (used by core.image_booklet) turns them back
+# to the drawn, upright image - the same way a camera stores a sideways
+# frame with a tag telling viewers how to rotate it.
+_EXIF_ORIENTATION_TAG: int = 0x0112
+_PRE_ROTATE_FOR_TAG: dict[int, Image.Transpose] = {
+    3: Image.Transpose.ROTATE_180,
+    6: Image.Transpose.ROTATE_90,
+    8: Image.Transpose.ROTATE_270,
+}
 
 
 # ----- Function Definitions -----
@@ -108,6 +121,7 @@ def generate_test_images(
     fmt: str,
     name_from_label: bool,
     box_frac: float,
+    exif_orientations: list[int] | None = None,
 ) -> Path:
     """
     Generate a batch of numbered test images.
@@ -117,10 +131,15 @@ def generate_test_images(
         folder: Batch folder name, created under test_pdfs/images/.
         labels: One number to draw per image (length must equal count).
         sizes: Candidate (width, height) pixel sizes, cycled across the batch.
-        dpis: Candidate DPI values, cycled across the batch.
+        dpis: Candidate DPI values, cycled across the batch; 0 means the
+            image is saved without any dpi metadata.
         fmt: Output format key (png, jpg, jpeg, webp, avif, tiff).
         name_from_label: Name each file after its label instead of its position.
         box_frac: Fraction of each image dimension the box should occupy.
+        exif_orientations: Optional EXIF orientation values (1, 3, 6, 8),
+            cycled across the batch and written to JPEGs only. The pixels
+            are pre-rotated the inverse way so exif_transpose() recovers
+            the drawn, upright image.
     Returns:
         The folder the images were written to.
     """
@@ -139,8 +158,20 @@ def generate_test_images(
         path: Path = output_dir / f"{stem}.{extension}"
 
         save_kwargs: dict[str, object] = {}
-        if fmt in DPI_FORMATS:
+        if 0 < dpi and fmt in DPI_FORMATS:
             save_kwargs["dpi"] = (dpi, dpi)
+        if exif_orientations and fmt in EXIF_FORMATS:
+            orientation: int = exif_orientations[
+                (index - 1) % len(exif_orientations)
+            ]
+            pre_rotate: Image.Transpose | None = _PRE_ROTATE_FOR_TAG.get(
+                orientation
+            )
+            if pre_rotate is not None:
+                image = image.transpose(pre_rotate)
+            exif: Image.Exif = Image.Exif()
+            exif[_EXIF_ORIENTATION_TAG] = orientation
+            save_kwargs["exif"] = exif.tobytes()
         image.save(path, **save_kwargs)
 
     print(f"Generated {zero_padding(count)} images → {output_dir}")
@@ -196,8 +227,17 @@ def main() -> None:
         "--dpi",
         type=int,
         action="append",
-        help="DPI metadata; repeat to cycle DPIs across the batch "
-        f"(default: {DEFAULT_DPI})",
+        help="DPI metadata; repeat to cycle DPIs across the batch; "
+        f"0 = save without dpi metadata (default: {DEFAULT_DPI})",
+    )
+    image_group.add_argument(
+        "--exif-orientation",
+        type=int,
+        action="append",
+        choices=(1, 3, 6, 8),
+        help="EXIF orientation tag (JPEG only); repeat to cycle across the "
+        "batch - pixels are pre-rotated so exif_transpose() recovers the "
+        "upright image (default: no EXIF tag)",
     )
     image_group.add_argument(
         "--format",
@@ -243,14 +283,24 @@ def main() -> None:
         parser.error("--size width and height must be at least 1")
 
     dpis: list[int] = args.dpi if args.dpi else [DEFAULT_DPI]
-    if any(d < 1 for d in dpis):
-        parser.error("--dpi must be at least 1")
+    if any(d < 0 for d in dpis):
+        parser.error("--dpi must be >= 0 (0 = omit dpi metadata)")
 
     fmt: str = "jpg" if args.format == "jpeg" else args.format
+    if args.exif_orientation and fmt not in EXIF_FORMATS:
+        parser.error("--exif-orientation requires --format jpg/jpeg")
     folder: str = args.folder or f"batch_{zero_padding(count)}_{fmt}"
 
     generate_test_images(
-        count, folder, labels, sizes, dpis, fmt, args.name_from_label, args.box_frac
+        count,
+        folder,
+        labels,
+        sizes,
+        dpis,
+        fmt,
+        args.name_from_label,
+        args.box_frac,
+        exif_orientations=args.exif_orientation or None,
     )
 
 
