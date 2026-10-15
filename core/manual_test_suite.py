@@ -11,6 +11,7 @@ import tempfile
 import time
 import urllib.request
 import zipfile
+from dataclasses import dataclass
 from pathlib import Path
 
 # ----- PyMuPDF Modules -----
@@ -18,8 +19,15 @@ import fitz
 
 # ----- Core Modules -----
 from core.booklet_imposition import build_booklet
-from core.calculation import impose
+from core.calculation import calculate_pages, impose
+from core.generate_test_images import IMAGES_DIR, generate_test_images
 from core.generate_test_pdf import generate_test_pdf
+from core.image_booklet import (
+    build_image_booklet,
+    build_image_document,
+    is_image_path,
+    natural_sort,
+)
 from core.verify_booklet import (
     BookletVerificationError,
     stamp_page_numbers,
@@ -56,6 +64,8 @@ CODE_PATHS: tuple[str, ...] = (
     "core/calculation.py",
     "core/verify_booklet.py",
     "core/generate_test_pdf.py",
+    "core/generate_test_images.py",
+    "core/image_booklet.py",
     "utils/format_utils.py",
     "utils/constants.py",
 )
@@ -65,6 +75,118 @@ GEOM_SAMPLE_SHEETS: int = 48
 GEOM_DIFF_MAX: float = 0.10
 GEOM_CHANNEL_TOL: int = 60
 GEOM_WHITE: int = 250
+
+# Issue #7: deterministic image batches for the suite. "dpis": [0] means
+# no dpi metadata is written; "exif" cycles EXIF orientation tags (JPEG
+# only - pixels are pre-rotated so exif_transpose recovers them).
+SUITE_IMAGE_BATCHES: tuple[dict, ...] = (
+    {
+        "folder": "suite_mixed",
+        "count": 12,
+        "fmt": "png",
+        "sizes": [(800, 600), (1200, 1600)],
+        "dpis": [150, 300],
+    },
+    {
+        "folder": "suite_tiff",
+        "count": 6,
+        "fmt": "tiff",
+        "sizes": [(1000, 1400)],
+        "dpis": [300],
+    },
+    {
+        "folder": "suite_nodpi",
+        "count": 6,
+        "fmt": "png",
+        "sizes": [(900, 1200)],
+        "dpis": [0],
+    },
+    {
+        "folder": "suite_exif",
+        "count": 4,
+        "fmt": "jpg",
+        "sizes": [(1200, 1600)],
+        "dpis": [300],
+        "exif": [1, 6, 8, 3],
+    },
+    {
+        "folder": "suite_webp",
+        "count": 4,
+        "fmt": "webp",
+        "sizes": [(900, 1200)],
+        "dpis": [150],
+    },
+    # The original issue-#7 dev batches, kept for continuity; same recipes
+    # as suite_mixed (png) and suite_tiff (jpeg) but auto-generated now.
+    {
+        "folder": "issue7_png",
+        "count": 12,
+        "fmt": "png",
+        "sizes": [(800, 600), (1200, 1600)],
+        "dpis": [150, 300],
+    },
+    {
+        "folder": "issue7_jpg",
+        "count": 6,
+        "fmt": "jpg",
+        "sizes": [(1000, 1400)],
+        "dpis": [300],
+    },
+)
+
+
+@dataclass
+class TestInput:
+    """One unit of work for the suite: a source PDF or an image set."""
+
+    name: str  # output filename, e.g. "numbered_08p.pdf" / "suite_mixed.pdf"
+    paths: tuple[Path, ...]  # PDF: (pdf,); images: natural-sorted files
+    kind: str  # "pdf" | "images"
+
+    @classmethod
+    def from_pdf(cls, path: Path) -> "TestInput":
+        return cls(path.name, (path,), "pdf")
+
+    @classmethod
+    def from_image_folder(cls, folder: Path) -> "TestInput | None":
+        images = natural_sort(
+            [
+                p
+                for p in folder.iterdir()
+                if p.is_file() and is_image_path(p)
+            ]
+        ) if folder.is_dir() else []
+        if not images:
+            return None
+        return cls(f"{folder.name}.pdf", tuple(images), "images")
+
+    @property
+    def is_images(self) -> bool:
+        return self.kind == "images"
+
+    @property
+    def pages(self) -> int | None:
+        """Page count; image sets are one page per file."""
+        if self.is_images:
+            return len(self.paths)
+        return _page_count(self.paths[0])
+
+    def fingerprint(self) -> str:
+        """Cache fingerprint: one file stat for PDFs, all stats for sets."""
+        return "+".join(_file_fingerprint(p) for p in self.paths)
+
+    def source(self) -> fitz.Document:
+        """A fresh, un-stamped source document (what the oracle re-derives)."""
+        if self.is_images:
+            return build_image_document(list(self.paths))
+        return fitz.open(str(self.paths[0]))
+
+    def build(self, dst: Path) -> None:
+        """Run the real production build for this input."""
+        if self.is_images:
+            build_image_booklet(list(self.paths), str(dst))
+        else:
+            build_booklet(str(self.paths[0]), str(dst))
 
 
 def make_numbered(path: Path, pages: int) -> None:
@@ -163,6 +285,28 @@ def ensure_synthetic_inputs(regen: bool) -> None:
             builder(path)
 
 
+def ensure_image_inputs(regen: bool) -> None:
+    """Generate the suite's image batches (issue #7) when missing."""
+    if not IMAGES_DIR.exists():
+        IMAGES_DIR.mkdir(parents=True, exist_ok=True)
+    for batch in SUITE_IMAGE_BATCHES:
+        folder = IMAGES_DIR / batch["folder"]
+        count: int = batch["count"]
+        exists = folder.is_dir() and len(list(folder.glob("*"))) >= count
+        if regen or not exists:
+            generate_test_images(
+                count,
+                batch["folder"],
+                list(range(1, count + 1)),
+                batch["sizes"],
+                batch["dpis"],
+                batch["fmt"],
+                False,
+                0.6,
+                exif_orientations=batch.get("exif"),
+            )
+
+
 def _looks_like_pdf(data: bytes) -> bool:
     return b"%PDF" in data[:1024]
 
@@ -245,19 +389,27 @@ def _page_count(path: Path) -> int | None:
         return None
 
 
-def collect_inputs(quick: bool, only: str | None) -> list[Path]:
-    inputs: list[Path] = sorted(SYNTHETIC_DIR.glob("*.pdf")) + sorted(
-        REAL_DIR.glob("*.pdf")
-    )
+def collect_inputs(quick: bool, only: str | None) -> list[TestInput]:
+    pdfs: list[TestInput] = [
+        TestInput.from_pdf(p)
+        for p in sorted(SYNTHETIC_DIR.glob("*.pdf")) + sorted(REAL_DIR.glob("*.pdf"))
+    ]
+    image_sets: list[TestInput] = []
+    if IMAGES_DIR.is_dir():
+        for folder in sorted(IMAGES_DIR.iterdir()):
+            item = TestInput.from_image_folder(folder)
+            if item is not None:
+                image_sets.append(item)
+    inputs: list[TestInput] = pdfs + image_sets
     if quick:
-        kept: list[Path] = []
-        for path in inputs:
-            pages: int | None = _page_count(path)
+        kept: list[TestInput] = []
+        for item in inputs:
+            pages: int | None = item.pages
             if pages is None or pages <= QUICK_MAX_PAGES:
-                kept.append(path)
+                kept.append(item)
         inputs = kept
     if only:
-        inputs = [p for p in inputs if only.lower() in p.name.lower()]
+        inputs = [i for i in inputs if only.lower() in i.name.lower()]
     return inputs
 
 
@@ -299,8 +451,8 @@ def _save_cache(cache: dict) -> None:
     CACHE_PATH.write_text(json.dumps(cache, indent=2, sort_keys=True), encoding="utf-8")
 
 
-def _cache_entry(src: Path, cache: dict) -> dict | None:
-    entry: dict | None = cache.get(src.name)
+def _cache_entry(name: str, cache: dict) -> dict | None:
+    entry: dict | None = cache.get(name)
     if not isinstance(entry, dict):
         return None
     return entry
@@ -315,14 +467,14 @@ def _resolve_sample(quick: bool, sample: int | None) -> int:
 def _cache_hit(
     entry: dict | None,
     code_fp: str,
-    src: Path,
+    fingerprint: str,
     dst: Path,
     geometry: bool,
     sample: int,
 ) -> bool:
     if entry is None or not dst.exists():
         return False
-    if entry.get("code") != code_fp or entry.get("src") != _file_fingerprint(src):
+    if entry.get("code") != code_fp or entry.get("src") != fingerprint:
         return False
     if geometry:
         if entry.get("sample") != sample:
@@ -403,12 +555,12 @@ def _dump_geometry_artifact(
 
 
 def geometry_check(
-    src_path: Path,
+    inp: TestInput,
     dst_path: Path,
     sample: int = GEOM_SAMPLE_SHEETS,
     artifacts: bool = True,
 ) -> tuple[bool, str]:
-    source: fitz.Document = fitz.open(src_path)
+    source: fitz.Document = inp.source()
     for page in source:
         if page.rotation:
             page.set_rotation(0)
@@ -422,7 +574,7 @@ def geometry_check(
 
     worst: float = 0.0
     failures: list[str] = []
-    stem_dir: Path = FAILURES_DIR / src_path.stem
+    stem_dir: Path = FAILURES_DIR / Path(inp.name).stem
     for index in indices:
         left_page, right_page = order[index]
         if index >= len(output):
@@ -490,15 +642,16 @@ def _oracle_canary() -> None:
         dst: Path = Path(tmp) / "canary_out.pdf"
         tampered: Path = Path(tmp) / "canary_tampered.pdf"
         make_numbered(src, 8)
-        build_booklet(str(src), str(dst))
-        ok, message = geometry_check(src, dst, artifacts=False)
+        inp: TestInput = TestInput.from_pdf(src)
+        inp.build(dst)
+        ok, message = geometry_check(inp, dst, artifacts=False)
         if not ok:
             raise RuntimeError(f"pristine output failed the oracle: {message}")
         document: fitz.Document = fitz.open(str(dst))
         document[0].draw_rect(document[0].rect, color=(0, 0, 0), fill=(0, 0, 0))
         document.save(str(tampered))
         document.close()
-        ok, message = geometry_check(src, tampered, artifacts=False)
+        ok, message = geometry_check(inp, tampered, artifacts=False)
         if ok:
             raise RuntimeError("tampered output passed the oracle")
     print("oracle canary: ok (pristine passes, tampered fails)")
@@ -512,14 +665,14 @@ def run_suite(
     force: bool,
     sample: int | None = None,
 ) -> int:
-    inputs: list[Path] = collect_inputs(quick, only)
+    inputs: list[TestInput] = collect_inputs(quick, only)
     if not inputs:
         print("No inputs matched.")
         return 1
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     if only is None:
-        clean_stale_outputs({p.name for p in inputs})
+        clean_stale_outputs({i.name for i in inputs})
 
     cache: dict = {} if force else _load_cache()
     code_fp: str = _code_fingerprint()
@@ -530,21 +683,25 @@ def run_suite(
     failures: int = 0
     skipped_cache: int = 0
 
-    for src in inputs:
-        dst: Path = OUTPUT_DIR / src.name
-        probe: fitz.Document = fitz.open(src)
-        pages: int = len(probe)
-        needs_pass: bool = probe.needs_pass
-        probe.close()
-        sheets: int = (pages + 3) // 4
+    for inp in inputs:
+        dst: Path = OUTPUT_DIR / inp.name
+        if inp.is_images:
+            pages = len(inp.paths)
+            needs_pass = False
+        else:
+            probe: fitz.Document = fitz.open(str(inp.paths[0]))
+            pages = len(probe)
+            needs_pass = probe.needs_pass
+            probe.close()
+        sheets: int = calculate_pages(pages) // 2
 
-        entry: dict | None = _cache_entry(src, cache)
+        entry: dict | None = _cache_entry(inp.name, cache)
         cache_hit: bool = not force and _cache_hit(
-            entry, code_fp, src, dst, geometry, geom_sample
+            entry, code_fp, inp.fingerprint(), dst, geometry, geom_sample
         )
 
         print("=" * 70)
-        print(f"Input: {src.name} ({pages} pages, {sheets} sheets expected)")
+        print(f"Input: {inp.name} ({pages} pages, {sheets} sheets expected)")
         print("=" * 70)
 
         if cache_hit:
@@ -553,7 +710,7 @@ def run_suite(
             geom_cell: str = str(entry.get("geometry", "-"))
             rows.append(
                 (
-                    src.name,
+                    inp.name,
                     str(pages),
                     str(sheets),
                     verify_cell,
@@ -572,18 +729,18 @@ def run_suite(
         status: str = "OK"
         verify_cell = "n/a"
         geom_cell = "n/a"
-        stem_dir: Path = FAILURES_DIR / src.stem
+        stem_dir: Path = FAILURES_DIR / Path(inp.name).stem
         shutil.rmtree(stem_dir, ignore_errors=True)
 
         try:
-            build_booklet(str(src), str(dst))
+            inp.build(dst)
         except ValueError as error:
             elapsed: float = time.perf_counter() - start
             if needs_pass:
-                print(f"REJECTED  {src.name}: {error}  ({elapsed:.1f}s)")
+                print(f"REJECTED  {inp.name}: {error}  ({elapsed:.1f}s)")
                 rows.append(
                     (
-                        src.name,
+                        inp.name,
                         str(pages),
                         str(sheets),
                         "rejected",
@@ -597,20 +754,20 @@ def run_suite(
             failures += 1
             status = "ERROR"
             verify_cell = str(error)
-            print(f"ERROR  {src.name}: {type(error).__name__}: {error}")
+            print(f"ERROR  {inp.name}: {type(error).__name__}: {error}")
         except BookletVerificationError as error:
             elapsed = time.perf_counter() - start
             failures += 1
             status = "FAIL"
             verify_cell = "FAIL"
             geom_cell = "n/a"
-            print(f"VERIFY FAIL  {src.name}: {error}")
+            print(f"VERIFY FAIL  {inp.name}: {error}")
         except Exception as error:
             elapsed = time.perf_counter() - start
             failures += 1
             status = "ERROR"
             verify_cell = str(error)
-            print(f"ERROR  {src.name}: {type(error).__name__}: {error}")
+            print(f"ERROR  {inp.name}: {type(error).__name__}: {error}")
         else:
             verify_passed, failed_sheets, verify_log = _quiet_verify(dst, pages)
             verify_cell = "pass" if verify_passed else "FAIL"
@@ -620,22 +777,22 @@ def run_suite(
                 _dump_verify_artifacts(stem_dir, dst, verify_log, failed_sheets)
                 print(f"verify artifacts: {stem_dir}")
             if geometry and status == "OK":
-                geom_ok, geom_cell = geometry_check(src, dst, sample=geom_sample)
+                geom_ok, geom_cell = geometry_check(inp, dst, sample=geom_sample)
                 if not geom_ok:
                     failures += 1
                     status = "FAIL"
-                    print(f"GEOMETRY FAIL  {src.name}: {geom_cell}")
+                    print(f"GEOMETRY FAIL  {inp.name}: {geom_cell}")
                     print(f"geometry artifacts: {stem_dir}")
                 else:
                     print(f"geometry: {geom_cell}")
             elif not geometry:
                 geom_cell = "skipped"
             elapsed = time.perf_counter() - start
-            print(f"{status}  {src.name} -> {dst.name}  ({elapsed:.1f}s)")
+            print(f"{status}  {inp.name} -> {dst.name}  ({elapsed:.1f}s)")
 
         rows.append(
             (
-                src.name,
+                inp.name,
                 str(pages),
                 str(sheets),
                 verify_cell,
@@ -645,15 +802,15 @@ def run_suite(
             )
         )
         if status == "OK":
-            cache[src.name] = {
+            cache[inp.name] = {
                 "code": code_fp,
-                "src": _file_fingerprint(src),
+                "src": inp.fingerprint(),
                 "verify": verify_cell,
                 "geometry": geom_cell,
                 "sample": geom_sample if geometry else None,
             }
         else:
-            cache.pop(src.name, None)
+            cache.pop(inp.name, None)
         cache_changed = True
         print()
 
@@ -680,7 +837,7 @@ def run_suite(
 
 
 def run_list(quick: bool, only: str | None, geometry: bool, sample: int | None) -> int:
-    inputs: list[Path] = collect_inputs(quick, only)
+    inputs: list[TestInput] = collect_inputs(quick, only)
     if not inputs:
         print("No inputs matched.")
         return 1
@@ -688,18 +845,20 @@ def run_list(quick: bool, only: str | None, geometry: bool, sample: int | None) 
     code_fp: str = _code_fingerprint()
     geom_sample: int = _resolve_sample(quick, sample)
     planned: int = 0
-    for src in inputs:
-        dst: Path = OUTPUT_DIR / src.name
-        pages: int | None = _page_count(src)
-        entry: dict | None = _cache_entry(src, cache)
-        cache_hit: bool = _cache_hit(entry, code_fp, src, dst, geometry, geom_sample)
+    for inp in inputs:
+        dst: Path = OUTPUT_DIR / inp.name
+        pages: int | None = inp.pages
+        entry: dict | None = _cache_entry(inp.name, cache)
+        cache_hit: bool = _cache_hit(
+            entry, code_fp, inp.fingerprint(), dst, geometry, geom_sample
+        )
         if cache_hit:
             state: str = "cached"
         else:
             state = "run"
             planned += 1
         print(
-            f"{state:7s} {src.name:32.32s} {str(pages if pages is not None else '?'):>6} pages"
+            f"{state:7s} {inp.name:32.32s} {str(pages if pages is not None else '?'):>6} pages"
         )
     print(
         f"{len(inputs)} input(s), {planned} would run, {len(inputs) - planned} cached"
@@ -765,6 +924,7 @@ def main() -> None:
         parser.error("--sample must be >= 0 (0 = every sheet)")
 
     ensure_synthetic_inputs(args.regen)
+    ensure_image_inputs(args.regen)
     for warning in ensure_real_inputs(args.offline):
         print(f"WARNING: {warning}")
 
