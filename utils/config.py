@@ -69,6 +69,8 @@ class Config:
             "accent": "random",
             "default_output_dir": "",
             "default_input_dir": "",
+            "default_folder_dir": "",
+            "image_view_mode": "list",
             "auto_open_output": False,
             "open_output_mode": "reveal",
             "output_filename_template": "{stem}_booklet.pdf",
@@ -137,6 +139,29 @@ class Config:
     def default_input_dir(self, path: str) -> None:
         """Set default start folder for the Open PDF dialog."""
         self.settings["default_input_dir"] = path
+
+    @property
+    def default_folder_dir(self) -> str:
+        """Get default start folder for the Add Folder dialog ('' = fallback)."""
+        return self.settings.get("default_folder_dir", "")
+
+    @default_folder_dir.setter
+    def default_folder_dir(self, path: str) -> None:
+        """Set default start folder for the Add Folder dialog."""
+        self.settings["default_folder_dir"] = path
+
+    @property
+    def image_view_mode(self) -> str:
+        """Get image-set dialog layout: 'list' or 'thumbnails'."""
+        value = self.settings.get("image_view_mode", "list")
+        return value if value in ("list", "thumbnails") else "list"
+
+    @image_view_mode.setter
+    def image_view_mode(self, value: str) -> None:
+        """Set image-set dialog layout."""
+        if value not in ("list", "thumbnails"):
+            value = "list"
+        self.settings["image_view_mode"] = value
 
     @property
     def auto_open_output(self) -> bool:

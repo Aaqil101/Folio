@@ -131,6 +131,36 @@ class SettingsDialog(QDialog):
         )
         input_layout.addWidget(input_row)
 
+        add_folder_row, self.add_folder_edit = self._build_folder_row(
+            "Add Folder default:",
+            "Leave empty to use the default folder above",
+            self.browse_add_folder,
+        )
+        input_layout.addWidget(add_folder_row)
+
+        view_row: QWidget = QWidget()
+        view_row_layout: QHBoxLayout = QHBoxLayout(view_row)
+        view_row_layout.setContentsMargins(0, 0, 0, 0)
+        view_row_layout.setSpacing(8)
+
+        view_label: QLabel = QLabel("Image set view:")
+        view_label.setMinimumWidth(100)
+        view_row_layout.addWidget(view_label)
+
+        self.view_mode_combo: QComboBox = QComboBox()
+        self.view_mode_combo.addItem("List", "list")
+        self.view_mode_combo.addItem("Thumbnails", "thumbnails")
+        view_row_layout.addWidget(self.view_mode_combo, 1)
+        view_row_layout.addStretch()
+
+        input_layout.addWidget(view_row)
+
+        view_info: QLabel = QLabel(
+            "Layout used when arranging the images of an image-set job."
+        )
+        view_info.setWordWrap(True)
+        input_layout.addWidget(view_info)
+
         input_section.setWidget(input_content)
         self._add_section(sections_layout, input_section)
 
@@ -416,6 +446,9 @@ class SettingsDialog(QDialog):
         self.accent_combo.setCurrentIndex(index if index >= 0 else 0)
 
         self.input_folder_edit.setText(config.default_input_dir)
+        self.add_folder_edit.setText(config.default_folder_dir)
+        view_index: int = self.view_mode_combo.findData(config.image_view_mode)
+        self.view_mode_combo.setCurrentIndex(view_index if view_index >= 0 else 0)
         self.folder_edit.setText(config.default_output_dir)
         self.template_edit.setText(config.output_filename_template)
         self.confirm_overwrite_check.setChecked(config.confirm_overwrite)
@@ -451,6 +484,16 @@ class SettingsDialog(QDialog):
         if path:
             self.input_folder_edit.setText(path)
 
+    def browse_add_folder(self) -> None:
+        """Open a directory picker for the Add Folder default."""
+        path: str = QFileDialog.getExistingDirectory(
+            self,
+            "Choose default folder for Add Folder",
+            self.add_folder_edit.text() or "",
+        )
+        if path:
+            self.add_folder_edit.setText(path)
+
     def browse_output_folder(self) -> None:
         """Open a directory picker for the default output folder."""
         path: str = QFileDialog.getExistingDirectory(
@@ -477,6 +520,8 @@ class SettingsDialog(QDialog):
 
         config.accent = chosen_accent
         config.default_input_dir = self.input_folder_edit.text().strip()
+        config.default_folder_dir = self.add_folder_edit.text().strip()
+        config.image_view_mode = self.view_mode_combo.currentData()
         config.default_output_dir = self.folder_edit.text().strip()
         config.output_filename_template = (
             self.template_edit.text().strip() or "{stem}_booklet.pdf"
