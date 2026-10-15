@@ -7,12 +7,13 @@ Ported from Obsidian-Forge (Blender-Launcher-V2 design patterns).
 from typing import List
 
 # ----- PySide6 Modules -----
-from PySide6.QtCore import QSize, Signal, Slot
-from PySide6.QtGui import QFont, QFontDatabase
+from PySide6.QtCore import QEvent, QObject, QSize, Qt, Signal, Slot
+from PySide6.QtGui import QCursor, QFont, QFontDatabase
 from PySide6.QtWidgets import (
     QCheckBox,
     QFrame,
     QGridLayout,
+    QHBoxLayout,
     QLabel,
     QLayout,
     QPushButton,
@@ -61,8 +62,17 @@ class SettingsGroup(QFrame):
         # Get the app's accent color theme
         self.accent: dict[str, str] = AccentTheme.get()
 
+        # Header row: the whole band (chevron + heading + empty space) toggles
+        self._header = QFrame(self)
+        self._header.setProperty("SettingsHeader", True)
+        self._header.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        self._header_layout = QHBoxLayout(self._header)
+        self._header_layout.setContentsMargins(4, 2, 4, 2)
+        self._header_layout.setSpacing(6)
+        self._header.installEventFilter(self)
+
         # Collapse/expand button - compact size
-        self.collapse_button = QPushButton(self)
+        self.collapse_button = QPushButton(self._header)
         self.collapse_button.setProperty("CollapseButton", True)
         self.collapse_button.setFixedSize(18, 18)
         self.collapse_button.setIcon(
@@ -70,20 +80,22 @@ class SettingsGroup(QFrame):
         )
         self.collapse_button.setIconSize(QSize(10, 10))
         self.collapse_button.clicked.connect(self.toggle)
-        self._layout.addWidget(self.collapse_button, 0, 0, 1, 1)
+        self._header_layout.addWidget(self.collapse_button)
 
         # Label or checkbox
         self._checkable: bool = checkable
         if checkable:
-            self.checkbutton = QCheckBox(self)
+            self.checkbutton = QCheckBox(self._header)
             self.checkbutton.setText(label)
             self.checkbutton.clicked.connect(self.checked.emit)
-            self._layout.addWidget(self.checkbutton, 0, 1, 1, 1)
+            self._header_layout.addWidget(self.checkbutton)
             self.label = None
         else:
             self.checkbutton = None
-            self.label = QLabel(f"{label}")
+            self.label = QLabel(f"{label}", self._header)
             self.label.setProperty("SectionHeader", True)
+            # Let header clicks fall through to the header frame's handler
+            self.label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
 
             # Load and apply OpenSans-SemiBold font
             font_id: int = QFontDatabase.addApplicationFont(
@@ -98,7 +110,10 @@ class SettingsGroup(QFrame):
                     font.setPointSize(FONT_SIZE_HEADER)
                     self.label.setFont(font)
 
-            self._layout.addWidget(self.label, 0, 1, 1, 1)
+            self._header_layout.addWidget(self.label)
+
+        self._header_layout.addStretch(1)
+        self._layout.addWidget(self._header, 0, 0, 1, 3)
 
         # Action button (optional, initially hidden)
         self.action_button = None
@@ -116,7 +131,7 @@ class SettingsGroup(QFrame):
             self._layout.removeWidget(self._widget)
 
         self._widget = w
-        self._layout.addWidget(self._widget, 1, 0, 1, 2)
+        self._layout.addWidget(self._widget, 1, 0, 1, 3)
 
     @Slot(QLayout)
     def setLayout(self, layout: QLayout) -> None:
@@ -126,7 +141,22 @@ class SettingsGroup(QFrame):
 
         self._widget = QWidget()
         self._widget.setLayout(layout)
-        self._layout.addWidget(self._widget, 1, 0, 1, 2)
+        self._layout.addWidget(self._widget, 1, 0, 1, 3)
+
+    def eventFilter(self, obj: QObject, event: QEvent) -> bool:
+        """Toggle the group when the header band is clicked."""
+        if obj is self._header:
+            if event.type() == QEvent.Type.MouseButtonPress:
+                if event.button() == Qt.MouseButton.LeftButton:
+                    return True
+            elif event.type() == QEvent.Type.MouseButtonRelease:
+                if (
+                    event.button() == Qt.MouseButton.LeftButton
+                    and self._header.rect().contains(event.position().toPoint())
+                ):
+                    self.toggle()
+                    return True
+        return super().eventFilter(obj, event)
 
     @Slot(bool)
     def set_collapsed(self, collapsed: bool) -> None:
@@ -199,11 +229,11 @@ class SettingsGroup(QFrame):
         """
         # Remove existing action button if any
         if self.action_button:
-            self._layout.removeWidget(self.action_button)
+            self._header_layout.removeWidget(self.action_button)
             self.action_button.deleteLater()
 
         # Create new action button
-        self.action_button = QPushButton(self)
+        self.action_button = QPushButton(self._header)
         self.action_button.setProperty("CollapseButton", True)
         self.action_button.setFixedSize(20, 20)
         self.action_button.setIcon(get_icon(icon_name, color=self.accent["border"]))
@@ -211,5 +241,5 @@ class SettingsGroup(QFrame):
         self.action_button.setToolTip(tooltip)
         self.action_button.clicked.connect(self.action_clicked.emit)
 
-        # Add to layout - column 2 (after label/checkbox)
-        self._layout.addWidget(self.action_button, 0, 2, 1, 1)
+        # Add to the header, after the heading
+        self._header_layout.addWidget(self.action_button)

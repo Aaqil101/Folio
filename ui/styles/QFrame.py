@@ -18,4 +18,14 @@ def qss() -> str:
         padding: 4px;
         margin-bottom: 4px;
     }}
+
+    /* === Settings Group Heading (clickable band) === */
+    QFrame[SettingsHeader="true"] {{
+        background-color: transparent;
+        border: none;
+    }}
+
+    QFrame[SettingsHeader="true"]:hover {{
+        background-color: rgba(255, 255, 255, 0.08);
+    }}
     """
