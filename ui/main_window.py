@@ -13,7 +13,6 @@ from PySide6.QtGui import (
     QBrush,
     QColor,
     QDragEnterEvent,
-    QDragMoveEvent,
     QDropEvent,
     QFont,
     QFontMetrics,
@@ -43,14 +42,23 @@ from PySide6.QtWidgets import (
 # ----- Core Modules -----
 from core.booklet_imposition import build_booklet
 from core.calculation import calculate_pages
+from core.image_booklet import (
+    IMAGE_EXTENSIONS,
+    build_image_booklet,
+    collect_images,
+    is_image_path,
+    natural_sort,
+)
 from core.page_info import count_pages
 from core.verify_booklet import BookletVerificationError
 
 # ----- UI Modules -----
 from ui.about_dialog import AboutDialog
+from ui.image_set_dialog import ImageSetDialog
 from ui.job_dialog import JobDialog
 from ui.log_window import LogWindow
 from ui.popup_window import PopupIcon, PopupWindow
+from ui.reorder import drop_event_moved
 from ui.settings import SettingsDialog
 
 # ----- Utils Modules -----
@@ -68,12 +76,22 @@ from utils.resources import get_icon
 
 STATUS_TIMEOUT_MS: int = 5000
 
+# Add/drag-drop picker filter: PDFs plus every supported image type
+_FILE_DIALOG_FILTER: str = "PDF and image files (*.pdf {extensions})".format(
+    extensions=" ".join(f"*{ext}" for ext in sorted(IMAGE_EXTENSIONS))
+)
+
 
 @dataclass
 class BookletJob:
     input_path: str
     output_path: str
     input_pages: int | None = None
+    image_paths: list[str] | None = None
+
+    @property
+    def is_image_job(self) -> bool:
+        return bool(self.image_paths)
 
 
 class _ProgressPipe:
@@ -160,12 +178,25 @@ class MainWindow(QMainWindow):
             normal_color=THEME_TEXT_PRIMARY,
             hover_color=accent["border"],
             icon_size=18,
-            text=" Add",
+            text=" Add File",
         )
-        self.add_btn.setToolTip("Add job (Ctrl+N)")
+        self.add_btn.setToolTip("Add PDFs or images (Ctrl+N)")
         self.add_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.add_btn.clicked.connect(self._add_job)
         layout.addWidget(self.add_btn)
+
+        self.folder_btn = HoverIconButtonSVG(
+            normal_icon="folder_outline.svg",
+            hover_icon="folder.svg",
+            normal_color=THEME_TEXT_PRIMARY,
+            hover_color=accent["border"],
+            icon_size=18,
+            text=" Add Folder",
+        )
+        self.folder_btn.setToolTip("Add a folder of PDFs/images")
+        self.folder_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.folder_btn.clicked.connect(self._add_folder)
+        layout.addWidget(self.folder_btn)
 
         self.edit_btn = HoverIconButtonSVG(
             normal_icon="edit.svg",
@@ -271,22 +302,10 @@ class MainWindow(QMainWindow):
             self._window = window
 
         def dropEvent(self, event: QDropEvent) -> None:
-            # Only accept drops on rows (vertical), reject column drops
-            target_row = self.rowAt(event.position().y())
-            if target_row == -1:
-                event.ignore()
+            if not drop_event_moved(self, event):
+                super().dropEvent(event)
                 return
-            super().dropEvent(event)
-            # Sync jobs list after visual reorder
             self._window._sync_jobs_after_reorder()
-
-        def dragMoveEvent(self, event: QDragMoveEvent) -> None:
-            # Only allow dragging within row boundaries
-            target_row = self.rowAt(event.position().y())
-            if target_row == -1:
-                event.ignore()
-                return
-            super().dragMoveEvent(event)
 
     class _PathDelegate(QStyledItemDelegate):
         """Two-line path cell: filename on top, dimmed folder below — never truncated."""
@@ -321,6 +340,9 @@ class MainWindow(QMainWindow):
                 return
             path = Path(text)
             filename: str = path.name
+            label = index.data(Qt.ItemDataRole.UserRole + 1)
+            if isinstance(label, str) and label:
+                filename = label
             folder: str = str(path.parent)
 
             selected = bool(option.state & QStyle.StateFlag.State_Selected)
@@ -371,7 +393,7 @@ class MainWindow(QMainWindow):
         self.table = self._JobTable(self)
         self.table.setObjectName("JobTable")
         self.table.setColumnCount(3)
-        self.table.setHorizontalHeaderLabels(["Input PDF", "Pages", "Output PDF"])
+        self.table.setHorizontalHeaderLabels(["Input", "Pages", "Output PDF"])
         self.table.horizontalHeader().setSectionResizeMode(
             0, QHeaderView.ResizeMode.Stretch
         )
@@ -405,7 +427,9 @@ class MainWindow(QMainWindow):
         viewport = self.table.viewport()
         viewport.installEventFilter(self)
 
-        self._empty_label = QLabel("Drag PDFs here or click + Add", viewport)
+        self._empty_label = QLabel(
+            "Drag PDFs or images here or click + Add", viewport
+        )
         self._empty_label.setObjectName("EmptyStateLabel")
         self._empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._empty_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
@@ -445,7 +469,23 @@ class MainWindow(QMainWindow):
 
     def _suggested_output(self, input_path: str) -> Path:
         """Suggest an output path for input_path, honouring settings."""
-        stem: str = Path(input_path).stem
+        return self._suggest_from(Path(input_path).stem, input_path)
+
+    def _suggested_image_output(self, image_paths: list[str]) -> Path:
+        """Suggest an output path for an image set.
+
+        Uses the shared parent folder's name when every image lives in
+        the same folder; otherwise the first image's stem.
+        """
+        parents = {str(Path(p).parent) for p in image_paths}
+        if len(parents) == 1:
+            stem: str = Path(image_paths[0]).parent.name or Path(image_paths[0]).stem
+        else:
+            stem = Path(image_paths[0]).stem
+        return self._suggest_from(stem, image_paths[0])
+
+    def _suggest_from(self, stem: str, like_path: str) -> Path:
+        """Render the filename template for `stem` next to `like_path`."""
         template: str = config.output_filename_template.strip()
         try:
             name: str = template.format(stem=stem) if template else ""
@@ -455,11 +495,20 @@ class MainWindow(QMainWindow):
             name = f"{stem}_booklet.pdf"
         if not Path(name).suffix:
             name += ".pdf"
-        suggested: Path = Path(input_path).with_name(name)
+        suggested: Path = Path(like_path).with_name(name)
         default_dir: str = config.default_output_dir
         if default_dir and Path(default_dir).is_dir():
             suggested = Path(default_dir) / suggested.name
         return suggested
+
+    @staticmethod
+    def _job_input_ok(job: BookletJob) -> bool:
+        """True when the job's input PDF / every image in its set exists."""
+        if job.image_paths:
+            return bool(job.image_paths) and all(
+                Path(p).is_file() for p in job.image_paths
+            )
+        return bool(job.input_path) and Path(job.input_path).is_file()
 
     def _load_queue(self) -> None:
         if not config.persist_queue:
@@ -467,7 +516,20 @@ class MainWindow(QMainWindow):
         cfg = config
         queue_data = cfg.settings.get("job_queue", [])
         for item in queue_data:
-            if isinstance(item, dict) and "input" in item and "output" in item:
+            if not (isinstance(item, dict) and "input" in item and "output" in item):
+                continue
+            images = item.get("images")
+            if isinstance(images, list) and images:
+                image_paths = [str(p) for p in images]
+                self.jobs.append(
+                    BookletJob(
+                        image_paths[0],
+                        item["output"],
+                        len(image_paths),
+                        image_paths,
+                    )
+                )
+            else:
                 self.jobs.append(
                     BookletJob(
                         item["input"], item["output"], count_pages(item["input"])
@@ -480,21 +542,36 @@ class MainWindow(QMainWindow):
             if config.settings.pop("job_queue", None) is not None:
                 config.save_settings()
             return
-        config.settings["job_queue"] = [
-            {"input": job.input_path, "output": job.output_path} for job in self.jobs
-        ]
+        entries = []
+        for job in self.jobs:
+            entry = {"input": job.input_path, "output": job.output_path}
+            if job.image_paths:
+                entry["images"] = list(job.image_paths)
+            entries.append(entry)
+        config.settings["job_queue"] = entries
         config.save_settings()
 
     def _refresh_table(self) -> None:
         self.table.setRowCount(len(self.jobs))
         states: list[tuple[bool, bool]] = []
         for row, job in enumerate(self.jobs):
-            input_ok: bool = Path(job.input_path).is_file()
+            input_ok: bool = self._job_input_ok(job)
             output_ok: bool = Path(job.output_path).exists()
             states.append((input_ok, output_ok))
 
             input_item = QTableWidgetItem(job.input_path)
             input_tip = job.input_path
+            if job.image_paths:
+                rest = len(job.image_paths) - 1
+                if rest:
+                    input_item.setData(
+                        Qt.ItemDataRole.UserRole + 1,
+                        f"{Path(job.image_paths[0]).name} +{rest}",
+                    )
+                input_tip = (
+                    f"Image set ({len(job.image_paths)}):\n"
+                    + "\n".join(job.image_paths)
+                )
             if not input_ok:
                 input_item.setForeground(QBrush(QColor(COLOR_RED)))
                 input_tip += "\nFile not found."
@@ -556,11 +633,11 @@ class MainWindow(QMainWindow):
         self._empty_label.setVisible(empty)
 
     def _valid_job_count(self) -> int:
-        """Jobs with both paths set whose input PDF exists on disk."""
+        """Jobs with both paths set whose input PDF / images exist on disk."""
         return sum(
             1
             for j in self.jobs
-            if j.input_path and j.output_path and Path(j.input_path).is_file()
+            if j.input_path and j.output_path and self._job_input_ok(j)
         )
 
     def _update_status_label(self) -> None:
@@ -614,10 +691,14 @@ class MainWindow(QMainWindow):
         menu.setObjectName("JobContextMenu")
         row = self.table.rowAt(pos.y())
 
-        add_action = QAction(get_icon("file.svg"), "Add Job", self)
+        add_action = QAction(get_icon("file.svg"), "Add File", self)
         add_action.setShortcut(QKeySequence("Ctrl+N"))
         add_action.triggered.connect(self._add_job)
         menu.addAction(add_action)
+
+        add_folder_action = QAction(get_icon("folder.svg"), "Add Folder", self)
+        add_folder_action.triggered.connect(self._add_folder)
+        menu.addAction(add_folder_action)
 
         if row >= 0:
             menu.addSeparator()
@@ -625,6 +706,15 @@ class MainWindow(QMainWindow):
             edit_action.setShortcut(QKeySequence("Enter"))
             edit_action.triggered.connect(lambda: self._edit_job(row))
             menu.addAction(edit_action)
+
+            if 0 <= row < len(self.jobs) and self.jobs[row].image_paths:
+                reorder_action = QAction(
+                    get_icon("view_list.svg"), "Reorder Images", self
+                )
+                reorder_action.triggered.connect(
+                    lambda: self._reorder_job_images(row)
+                )
+                menu.addAction(reorder_action)
 
             dup_action = QAction(get_icon("file_filled.svg"), "Duplicate Job", self)
             dup_action.triggered.connect(lambda: self._duplicate_job(row))
@@ -654,13 +744,94 @@ class MainWindow(QMainWindow):
         if config.default_input_dir and Path(config.default_input_dir).is_dir():
             start_dir = config.default_input_dir
         paths, _ = QFileDialog.getOpenFileNames(
-            self, "Add PDFs to queue", start_dir, "PDF files (*.pdf)"
+            self, "Add PDFs or images to queue", start_dir, _FILE_DIALOG_FILTER
         )
         if not paths:
             return
-        for path in paths:
+        self._ingest_paths(paths)
+
+    def _add_folder(self) -> None:
+        if self._batch_running:
+            return
+        start_dir = ""
+        preferred = config.default_folder_dir or config.default_input_dir
+        if preferred and Path(preferred).is_dir():
+            start_dir = preferred
+        folder = QFileDialog.getExistingDirectory(self, "Add folder", start_dir)
+        if not folder:
+            return
+        self._ingest_paths([folder])
+
+    @staticmethod
+    def _expand_folder(folder: Path) -> list[str]:
+        """Folder contents as ingestible paths: PDFs (natural-sorted) then images."""
+        pdfs = natural_sort(
+            [p for p in folder.rglob("*") if p.is_file() and p.suffix.lower() == ".pdf"]
+        )
+        images = collect_images([str(folder)])
+        return [str(p) for p in pdfs + images]
+
+    def _ingest_paths(self, paths: list[str]) -> None:
+        """Turn picked/dropped files and folders into queue jobs.
+
+        Folders expand recursively: PDFs become one job each, images are
+        grouped into a single image-set job (AC: one imposed PDF per set)
+        after a reorder pass. A folder with nothing supported is reported
+        in the status bar.
+        """
+        files: list[str] = []
+        empty_folders: list[str] = []
+        for entry in paths:
+            path = Path(entry)
+            if not path.is_dir():
+                files.append(entry)
+                continue
+            expanded = self._expand_folder(path)
+            if expanded:
+                files.extend(expanded)
+            else:
+                empty_folders.append(path.name)
+        pdfs = [p for p in files if not is_image_path(p)]
+        images = [str(p) for p in natural_sort([Path(p) for p in files if is_image_path(p)])]
+        for path in pdfs:
             output = str(self._suggested_output(path))
             self.jobs.append(BookletJob(path, output, count_pages(path)))
+        if images:
+            self._prompt_image_job(images)
+        self._refresh_table()
+        self._save_queue()
+        if empty_folders:
+            self._status(
+                "No PDFs or images in: " + ", ".join(empty_folders)
+            )
+
+    def _prompt_image_job(self, image_paths: list[str]) -> None:
+        """Open the reorder dialog and enqueue one job for the image set."""
+        dialog = ImageSetDialog(image_paths, parent=self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        ordered: list[str] = dialog.image_paths
+        output = str(self._suggested_image_output(ordered))
+        self.jobs.append(
+            BookletJob(ordered[0], output, len(ordered), ordered)
+        )
+
+    def _reorder_job_images(self, row: int) -> None:
+        """Reopen the reorder dialog for an existing image-set job."""
+        if self._batch_running or not (0 <= row < len(self.jobs)):
+            return
+        job = self.jobs[row]
+        if not job.image_paths:
+            return
+        dialog = ImageSetDialog(job.image_paths, parent=self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        ordered: list[str] = dialog.image_paths
+        if not ordered:
+            return
+        job.image_paths = ordered
+        job.input_path = ordered[0]
+        job.input_pages = len(ordered)
         self._refresh_table()
         self._save_queue()
 
@@ -673,14 +844,19 @@ class MainWindow(QMainWindow):
             job.input_path,
             job.output_path,
             suggest=lambda path: str(self._suggested_output(path)),
+            image_paths=job.image_paths,
             parent=self,
         )
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
 
+        job.image_paths = dialog.image_paths
         job.input_path = dialog.input_path
         job.output_path = dialog.output_path
-        job.input_pages = count_pages(job.input_path)
+        if job.image_paths:
+            job.input_pages = len(job.image_paths)
+        else:
+            job.input_pages = count_pages(job.input_path)
         self._refresh_table()
         self._save_queue()
 
@@ -693,7 +869,15 @@ class MainWindow(QMainWindow):
         if row < 0 or row >= len(self.jobs):
             return
         job = self.jobs[row]
-        self.jobs.insert(row + 1, BookletJob(job.input_path, job.output_path))
+        self.jobs.insert(
+            row + 1,
+            BookletJob(
+                job.input_path,
+                job.output_path,
+                job.input_pages,
+                list(job.image_paths) if job.image_paths else None,
+            ),
+        )
         self._refresh_table()
         self._save_queue()
 
@@ -747,13 +931,16 @@ class MainWindow(QMainWindow):
         missing: int = 0
         states: list[tuple[bool, bool]] = []
         for job in self.jobs:
-            input_ok: bool = Path(job.input_path).is_file()
+            input_ok: bool = self._job_input_ok(job)
             states.append((input_ok, Path(job.output_path).exists()))
             if not input_ok:
                 missing += 1
                 job.input_pages = None
             elif recount:
-                job.input_pages = count_pages(job.input_path)
+                if job.image_paths:
+                    job.input_pages = len(job.image_paths)
+                else:
+                    job.input_pages = count_pages(job.input_path)
 
         changed: bool = states != self._path_states
         if recount or changed:
@@ -783,6 +970,7 @@ class MainWindow(QMainWindow):
         self._batch_running = True
         self.table.setEnabled(False)
         self.add_btn.setEnabled(False)
+        self.folder_btn.setEnabled(False)
         self.generate_btn.setEnabled(False)
         self.refresh_btn.setEnabled(False)
 
@@ -794,14 +982,17 @@ class MainWindow(QMainWindow):
             successes: list[BookletJob] = []
 
             for i, job in enumerate(valid_jobs, 1):
-                self._status(
-                    f"Processing {i}/{len(valid_jobs)}: {Path(job.input_path).name}"
+                job_label: str = (
+                    f"{len(job.image_paths)} images"
+                    if job.image_paths
+                    else Path(job.input_path).name
                 )
+                self._status(f"Processing {i}/{len(valid_jobs)}: {job_label}")
                 QApplication.processEvents()
 
                 stamp = datetime.now().strftime("%H:%M:%S")
                 self.log_window.append_line(
-                    f"=== [{i}/{len(valid_jobs)}] Creating booklet from {Path(job.input_path).name} ({stamp}) ==="
+                    f"=== [{i}/{len(valid_jobs)}] Creating booklet from {job_label} ({stamp}) ==="
                 )
 
                 if config.confirm_overwrite and Path(job.output_path).exists():
@@ -820,9 +1011,18 @@ class MainWindow(QMainWindow):
 
                 try:
                     with _ProgressPipe(self):
-                        build_booklet(
-                            job.input_path, job.output_path, sheet_size=sheet_size
-                        )
+                        if job.image_paths:
+                            build_image_booklet(
+                                job.image_paths,
+                                job.output_path,
+                                sheet_size=sheet_size,
+                            )
+                        else:
+                            build_booklet(
+                                job.input_path,
+                                job.output_path,
+                                sheet_size=sheet_size,
+                            )
                 except BookletVerificationError as error:
                     self.log_window.append_line(f"FAILED: {job.input_path} — {error}")
                     PopupWindow(
@@ -873,6 +1073,8 @@ class MainWindow(QMainWindow):
         finally:
             self._batch_running = False
             self.table.setEnabled(True)
+            self.add_btn.setEnabled(True)
+            self.folder_btn.setEnabled(True)
             self._update_toolbar_buttons()
             self._update_generate_button()
 
@@ -901,6 +1103,7 @@ class MainWindow(QMainWindow):
         accent = AccentTheme.get()
         for btn in (
             self.add_btn,
+            self.folder_btn,
             self.edit_btn,
             self.delete_btn,
             self.clear_btn,
@@ -929,29 +1132,31 @@ class MainWindow(QMainWindow):
             self.log_window.raise_()
 
     @staticmethod
-    def _pdfs_from_mime(mime) -> list[str]:
+    def _files_from_mime(mime) -> list[str]:
+        """Local folders, PDFs and image paths from a drag-drop mime payload."""
         return [
             url.toLocalFile()
             for url in mime.urls()
-            if url.isLocalFile() and url.toLocalFile().lower().endswith(".pdf")
+            if url.isLocalFile()
+            and (
+                Path(url.toLocalFile()).is_dir()
+                or url.toLocalFile().lower().endswith(".pdf")
+                or is_image_path(url.toLocalFile())
+            )
         ]
 
     def dragEnterEvent(self, event: QDragEnterEvent) -> None:
-        if self._pdfs_from_mime(event.mimeData()):
+        if self._files_from_mime(event.mimeData()):
             event.acceptProposedAction()
         else:
             event.ignore()
 
     def dropEvent(self, event: QDropEvent) -> None:
-        pdfs = self._pdfs_from_mime(event.mimeData())
-        if not pdfs:
+        files = self._files_from_mime(event.mimeData())
+        if not files:
             event.ignore()
             return
-        for path in pdfs:
-            output = str(self._suggested_output(path))
-            self.jobs.append(BookletJob(path, output, count_pages(path)))
-        self._refresh_table()
-        self._save_queue()
+        self._ingest_paths(files)
         event.acceptProposedAction()
 
     def eventFilter(self, obj, event):

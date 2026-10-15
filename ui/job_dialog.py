@@ -3,6 +3,9 @@
 The output path is validated live (required, .pdf suffix, existing folder)
 and an inline warning blocks accept while an error is shown. Mirrors the
 Settings dialog conventions (MainLineEdit fields, BrowseButton, Save/Cancel).
+
+Image-set jobs (issue #7) swap the PDF browse row for a read-only summary
+plus a Reorder button that reopens ImageSetDialog.
 """
 
 # ----- Built-In Modules -----
@@ -22,6 +25,9 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+# ----- UI Modules -----
+from ui.image_set_dialog import ImageSetDialog
+
 # ----- Utils Modules -----
 from utils.color import COLOR_GREEN, THEME_TEXT_PRIMARY
 from utils.config import config
@@ -30,38 +36,49 @@ from utils.resources import get_icon
 
 
 class JobDialog(QDialog):
-    """Edit one queue job: input PDF plus a freely editable output path."""
+    """Edit one queue job: input PDF (or image set) plus an editable output path."""
 
     def __init__(
         self,
         input_path: str,
         output_path: str,
         suggest: Callable[[str], str] | None = None,
+        image_paths: list[str] | None = None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self.setWindowTitle("Edit job")
         self.setMinimumWidth(560)
         self._suggest = suggest
+        self._image_paths: list[str] | None = (
+            list(image_paths) if image_paths is not None else None
+        )
 
         self._build_ui()
-        self.input_edit.setText(input_path)
+        if self._image_paths is not None:
+            self._refresh_input_display()
+        else:
+            self.input_edit.setText(input_path)
         self.output_edit.setText(output_path)
         self.output_edit.textChanged.connect(self._update_warning)
         self._update_warning()
+
+    @property
+    def _is_image_job(self) -> bool:
+        return self._image_paths is not None
 
     def _build_ui(self) -> None:
         layout: QVBoxLayout = QVBoxLayout(self)
         layout.setContentsMargins(16, 16, 16, 16)
         layout.setSpacing(8)
 
-        # --- Input PDF row ---
+        # --- Input PDF / image-set row ---
         input_row: QWidget = QWidget()
         input_layout: QHBoxLayout = QHBoxLayout(input_row)
         input_layout.setContentsMargins(0, 0, 0, 0)
         input_layout.setSpacing(8)
 
-        input_label: QLabel = QLabel("Input PDF:")
+        input_label: QLabel = QLabel("Images:" if self._is_image_job else "Input PDF:")
         input_label.setMinimumWidth(90)
         input_layout.addWidget(input_label)
 
@@ -70,18 +87,33 @@ class JobDialog(QDialog):
         self.input_edit.setReadOnly(True)
         input_layout.addWidget(self.input_edit, 1)
 
-        input_browse: HoverIconButtonSVG = HoverIconButtonSVG(
-            normal_icon="file.svg",
-            hover_icon="file_filled.svg",
-            normal_color=THEME_TEXT_PRIMARY,
-            hover_color=THEME_TEXT_PRIMARY,
-            icon_size=14,
-        )
-        input_browse.setProperty("BrowseButton", True)
-        input_browse.setFixedHeight(32)
-        input_browse.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
-        input_browse.clicked.connect(self._browse_input)
-        input_layout.addWidget(input_browse)
+        if self._is_image_job:
+            reorder_btn: HoverIconButtonSVG = HoverIconButtonSVG(
+                normal_icon="file.svg",
+                hover_icon="file_filled.svg",
+                normal_color=THEME_TEXT_PRIMARY,
+                hover_color=THEME_TEXT_PRIMARY,
+                icon_size=14,
+                text="Reorder...",
+            )
+            reorder_btn.setProperty("BrowseButton", True)
+            reorder_btn.setFixedHeight(32)
+            reorder_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+            reorder_btn.clicked.connect(self._reorder_images)
+            input_layout.addWidget(reorder_btn)
+        else:
+            input_browse: HoverIconButtonSVG = HoverIconButtonSVG(
+                normal_icon="file.svg",
+                hover_icon="file_filled.svg",
+                normal_color=THEME_TEXT_PRIMARY,
+                hover_color=THEME_TEXT_PRIMARY,
+                icon_size=14,
+            )
+            input_browse.setProperty("BrowseButton", True)
+            input_browse.setFixedHeight(32)
+            input_browse.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+            input_browse.clicked.connect(self._browse_input)
+            input_layout.addWidget(input_browse)
 
         layout.addWidget(input_row)
 
@@ -168,11 +200,32 @@ class JobDialog(QDialog):
 
     @property
     def input_path(self) -> str:
+        if self._is_image_job:
+            return self._image_paths[0] if self._image_paths else ""
         return self.input_edit.text().strip()
+
+    @property
+    def image_paths(self) -> list[str] | None:
+        """The image set for image jobs; None for PDF jobs."""
+        if self._is_image_job:
+            return list(self._image_paths or [])
+        return None
 
     @property
     def output_path(self) -> str:
         return self.output_edit.text().strip()
+
+    def _refresh_input_display(self) -> None:
+        count = len(self._image_paths or [])
+        self.input_edit.setText(f"{count} image{'s' if count != 1 else ''}")
+        self.input_edit.setToolTip("\n".join(self._image_paths or []))
+        self._update_warning()
+
+    def _reorder_images(self) -> None:
+        dialog = ImageSetDialog(self._image_paths or [], self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self._image_paths = dialog.image_paths
+            self._refresh_input_display()
 
     def _browse_input(self) -> None:
         start: str = ""
@@ -225,6 +278,13 @@ class JobDialog(QDialog):
         return ""
 
     def _validation_message(self) -> str:
+        if self._is_image_job:
+            if not self._image_paths:
+                return "Add at least one image."
+            missing = [p for p in self._image_paths if not Path(p).is_file()]
+            if missing:
+                return f"Image not found: {missing[0]}"
+            return self._output_error()
         if not self.input_path:
             return "Choose an input PDF."
         if not Path(self.input_path).is_file():

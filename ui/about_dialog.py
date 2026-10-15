@@ -169,7 +169,7 @@ class AboutDialog(QDialog):
         features: list[tuple[str, str]] = [
             ("file.svg", "Two-up booklet imposition"),
             ("check_bold.svg", "Sheet-by-sheet verification"),
-            ("folder_open.svg", "Drag and drop PDFs"),
+            ("folder_open.svg", "Drag and drop PDFs or images"),
         ]
 
         for icon, text in features:
