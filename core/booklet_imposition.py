@@ -70,20 +70,22 @@ def place_pages_side_by_side(
         new_page.show_pdf_page(dest, source, index, clip=media)
 
 
-def build_booklet(
-    input_path: str,
+def impose_document(
+    source: fitz.Document,
     output_path: str,
     sheet_size: tuple[float, float] = A4_LANDSCAPE,
 ) -> None:
     """
-    Create a booklet-imposed PDF from an input PDF file.
+    Impose an already-open source document into a booklet PDF.
 
-    Reads the PDF at input_path, computes an imposition order using
-    core.calculation.impose, places two pages side-by-side per output
-    page and writes the resulting PDF to output_path.
+    Shared by build_booklet() (PDF files) and core.image_booklet
+    (image sets wrapped into a PDF document first). Clears any /Rotate
+    flags, stamps every source page with its invisible page number,
+    imposes two pages per sheet, verifies the result, and saves it.
 
     Arguments:
-        input_path: Path to the source PDF file.
+        source: An open PDF document (already rotation-cleared is fine;
+            this function clears /Rotate itself).
         output_path: Path where the imposed PDF will be saved.
         sheet_size: (width, height) of the landscape output sheet.
 
@@ -92,12 +94,9 @@ def build_booklet(
         BookletVerificationError: The imposed sheets failed stamp
             verification; nothing is written to output_path.
     """
-
-    source: fitz.Document = fitz.open(input_path)
     if source.needs_pass:
-        source.close()
         raise ValueError(
-            f"Source PDF is password-protected and cannot be imposed: {input_path}"
+            "Source PDF is password-protected and cannot be imposed."
         )
     for page in source:
         if page.rotation:
@@ -121,15 +120,45 @@ def build_booklet(
         place_pages_side_by_side(source, output, left_index, right_index, sheet_size)
 
     if not verify_booklet(output, order, sheet_size):
-        source.close()
         output.close()
         raise BookletVerificationError(
             f"Verification failed for {page_numbers} pages; booklet not saved."
         )
     output.save(output_path)
-    source.close()
     output.close()
     print("Booklet saved to:", output_path)
+
+
+def build_booklet(
+    input_path: str,
+    output_path: str,
+    sheet_size: tuple[float, float] = A4_LANDSCAPE,
+) -> None:
+    """
+    Create a booklet-imposed PDF from an input PDF file.
+
+    Reads the PDF at input_path and delegates to impose_document().
+
+    Arguments:
+        input_path: Path to the source PDF file.
+        output_path: Path where the imposed PDF will be saved.
+        sheet_size: (width, height) of the landscape output sheet.
+
+    Raises:
+        ValueError: The source is not a PDF, or is password-protected.
+        BookletVerificationError: The imposed sheets failed stamp
+            verification; nothing is written to output_path.
+    """
+    source: fitz.Document = fitz.open(input_path)
+    if not source.is_pdf:
+        source.close()
+        raise ValueError(
+            f"Input is not a PDF (use core.image_booklet for images): {input_path}"
+        )
+    try:
+        impose_document(source, output_path, sheet_size)
+    finally:
+        source.close()
 
 
 if __name__ == "__main__":
