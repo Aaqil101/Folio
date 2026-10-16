@@ -1,0 +1,11 @@
+# Build-time dependencies for packaging Folio (issue #14).
+# Not needed to run the app from source - install with:
+#     pip install -r requirements.txt -r requirements-build.txt
+# packaging is deliberately absent: it is already a runtime dependency in
+# requirements.txt and satisfies pyinstaller's requirement.
+pyinstaller==6.22.3
+pyinstaller-hooks-contrib==2026.8
+altgraph==0.17.5
+pefile==2024.8.26
+pywin32-ctypes==0.2.3
+setuptools==84.0.0
