@@ -6,11 +6,13 @@ from utils.color import (
     THEME_TEXT_PRIMARY,
     THEME_TEXT_SECONDARY,
     AccentTheme,
+    accent_selection_bg,
 )
 
 
 def qss() -> str:
     accent: dict[str, str] = AccentTheme.get()
+    selection_bg: str = accent_selection_bg()
     return f"""
     /* === Disabled Save/Generate Button === */
     QPushButton[SaveButton="true"]:disabled {{
@@ -97,12 +99,11 @@ def qss() -> str:
         background-color: {accent['hover_background']};
     }}
     #JobTable::item:selected {{
-        background-color: {accent['main_background']};
+        background-color: {selection_bg};
         color: {THEME_TEXT_PRIMARY};
-        border-left: 2px solid {accent['border']};
     }}
     #JobTable::item:selected:!active {{
-        background-color: {accent['main_background']};
+        background-color: {selection_bg};
     }}
     #JobTable QHeaderView::section {{
         background-color: {THEME_BG_SECONDARY};
@@ -129,12 +130,11 @@ def qss() -> str:
         background-color: {accent['hover_background']};
     }}
     #ImageSetTable::item:selected {{
-        background-color: {accent['main_background']};
+        background-color: {selection_bg};
         color: {THEME_TEXT_PRIMARY};
-        border-left: 2px solid {accent['border']};
     }}
     #ImageSetTable::item:selected:!active {{
-        background-color: {accent['main_background']};
+        background-color: {selection_bg};
     }}
     #ImageSetTable QHeaderView::section {{
         background-color: {THEME_BG_SECONDARY};
@@ -161,11 +161,11 @@ def qss() -> str:
         background-color: {accent['hover_background']};
     }}
     #ImageSetGrid::item:selected {{
-        background-color: {accent['main_background']};
+        background-color: {selection_bg};
         border: 1px solid {accent['border']};
     }}
     #ImageSetGrid::item:selected:!active {{
-        background-color: {accent['main_background']};
+        background-color: {selection_bg};
     }}
 
     /* --- Image set view toggle (list / thumbnails) --- */

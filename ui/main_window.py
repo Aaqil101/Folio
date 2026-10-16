@@ -68,6 +68,7 @@ from utils.color import (
     COLOR_YELLOW,
     THEME_TEXT_PRIMARY,
     AccentTheme,
+    accent_selection_bg,
 )
 from utils.config import config
 from utils.constants import SHEET_SIZES
@@ -331,9 +332,15 @@ class MainWindow(QMainWindow):
                 if option.widget is not None
                 else QApplication.style()
             )
+            selected = bool(option.state & QStyle.StateFlag.State_Selected)
             background = QStyleOptionViewItem(option)
             background.text = ""
             style.drawControl(QStyle.ControlElement.CE_ItemViewItem, background, painter)
+            if selected:
+                # QSS ::item:selected never lands on this custom drawControl path
+                # (the native palette highlight shows through instead) — paint the
+                # shared opaque selection fill ourselves, under the text below.
+                painter.fillRect(option.rect, QColor(accent_selection_bg()))
 
             text = str(index.data(Qt.ItemDataRole.DisplayRole) or "")
             if not text:
@@ -345,7 +352,6 @@ class MainWindow(QMainWindow):
                 filename = label
             folder: str = str(path.parent)
 
-            selected = bool(option.state & QStyle.StateFlag.State_Selected)
             brush = index.data(Qt.ItemDataRole.ForegroundRole)
             if isinstance(brush, QBrush):
                 color = brush.color()

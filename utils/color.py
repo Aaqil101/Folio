@@ -121,3 +121,38 @@ class AccentTheme:
             "gray": AccentTheme.GRAY,
         }
         AccentTheme._shared_theme = accents.get(name.lower())
+
+
+# ══════════════════════════════════════════════════════════════════
+# SELECTION FILL - opaque, machine-independent
+# ══════════════════════════════════════════════════════════════════
+SELECTION_ALPHA = 0.35
+
+
+def blend_over(color: str, bg: str, alpha: float | None = None) -> str:
+    """Composite `color` (an 'rgb(...)' / 'rgba(...)' string) over opaque `bg`.
+
+    `alpha` (0..1) replaces the color's own alpha when given. Returns '#rrggbb'.
+    """
+    nums = color[color.index("(") + 1 : color.index(")")].split(",")
+    r, g, b = (int(float(v)) for v in nums[:3])
+    a = alpha if alpha is not None else (float(nums[3]) if len(nums) > 3 else 1.0)
+    br, bgc, bb = (int(bg[i : i + 2], 16) for i in (1, 3, 5))
+    return "#%02x%02x%02x" % (
+        round(r * a + br * (1 - a)),
+        round(g * a + bgc * (1 - a)),
+        round(b * a + bb * (1 - a)),
+    )
+
+
+def accent_selection_bg() -> str:
+    """Opaque selected-row fill: the accent tint pre-blended over the row background.
+
+    Selection rules must not use translucent rgba fills: Qt composites them over
+    the style's native palette highlight, so the visible color ends up blending
+    with the OS/Fusion highlight (machine-dependent mud, varying again with
+    :selected vs :selected:!active double-paints). A solid #rrggbb covers it.
+    """
+    return blend_over(
+        AccentTheme.get()["main_background"], THEME_BG_SECONDARY, SELECTION_ALPHA
+    )
