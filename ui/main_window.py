@@ -7,7 +7,16 @@ from datetime import datetime
 from pathlib import Path
 
 # ----- PySide6 Modules -----
-from PySide6.QtCore import QEvent, QModelIndex, QPoint, QRect, QSize, Qt
+from PySide6.QtCore import (
+    QEvent,
+    QItemSelection,
+    QItemSelectionModel,
+    QModelIndex,
+    QPoint,
+    QRect,
+    QSize,
+    Qt,
+)
 from PySide6.QtGui import (
     QAction,
     QBrush,
@@ -16,7 +25,9 @@ from PySide6.QtGui import (
     QDropEvent,
     QFont,
     QFontMetrics,
+    QKeyEvent,
     QKeySequence,
+    QShortcut,
 )
 from PySide6.QtWidgets import (
     QApplication,
@@ -158,6 +169,24 @@ class MainWindow(QMainWindow):
         self.statusBar()
 
         self.installEventFilter(self)
+
+        # Alt+Up/Alt+Down move the selected job(s) — wired twice on purpose,
+        # same as the image dialog: these window-level shortcuts catch a press
+        # even when focus sits on a toolbar button, while the table's
+        # keyPressEvent branch covers direct key delivery; each path consumes
+        # the event so they never double-fire.
+        self._move_shortcuts: list[QShortcut] = []
+        for sequence, key in (
+            ("Alt+Up", Qt.Key.Key_Up),
+            ("Alt+Down", Qt.Key.Key_Down),
+        ):
+            shortcut = QShortcut(QKeySequence(sequence), self)
+            shortcut.setContext(Qt.ShortcutContext.WindowShortcut)
+            shortcut.activated.connect(
+                lambda k=key: self._move_selected_jobs(-1 if k == Qt.Key.Key_Up else 1)
+            )
+            self._move_shortcuts.append(shortcut)
+
         self._load_queue()
         self._refresh_table()
 
@@ -307,6 +336,48 @@ class MainWindow(QMainWindow):
                 super().dropEvent(event)
                 return
             self._window._sync_jobs_after_reorder()
+
+        def keyPressEvent(self, event: QKeyEvent) -> None:
+            if (
+                event.modifiers() & Qt.KeyboardModifier.AltModifier
+                and event.key() in (Qt.Key.Key_Up, Qt.Key.Key_Down)
+            ):
+                # Rows are vertical: Alt+Up/Down reorders (matching axis).
+                self._window._move_selected_jobs(
+                    -1 if event.key() == Qt.Key.Key_Up else 1
+                )
+                event.accept()
+                return
+            if event.modifiers() == Qt.KeyboardModifier.NoModifier and event.key() in (
+                Qt.Key.Key_Up,
+                Qt.Key.Key_Down,
+                Qt.Key.Key_Left,
+                Qt.Key.Key_Right,
+            ):
+                # Plain arrows walk the rows and wrap at the ends (the highlight
+                # loops 1 <-> N); column navigation is useless in this table
+                # and made the arrows feel dead at the edges.
+                count = self.rowCount()
+                if count:
+                    row = self.currentIndex().row()
+                    if row < 0:
+                        row = (
+                            0
+                            if event.key() in (Qt.Key.Key_Down, Qt.Key.Key_Right)
+                            else count - 1
+                        )
+                    elif event.key() in (Qt.Key.Key_Down, Qt.Key.Key_Right):
+                        row = (row + 1) % count
+                    else:
+                        row = (row - 1 + count) % count
+                    col = self.currentColumn()
+                    self.setCurrentIndex(
+                        self.model().index(row, col if col >= 0 else 0)
+                    )
+                    self.selectRow(row)
+                    event.accept()
+                    return
+            super().keyPressEvent(event)
 
     class _PathDelegate(QStyledItemDelegate):
         """Two-line path cell: filename on top, dimmed folder below — never truncated."""
@@ -685,6 +756,91 @@ class MainWindow(QMainWindow):
         # Rebuild so the table matches the new order exactly
         self._refresh_table()
 
+    def _move_selected_jobs(self, delta: int) -> None:
+        """Shift the selected jobs one step up (-1) or down (+1).
+
+        When no row of the selection can step freely (every row is at the
+        edge or blocked by its own selection neighbour), the whole block
+        wraps to the opposite end, keeping its internal order — the queue
+        behaves like a ring, same as the image-set dialog.
+        """
+        if self._batch_running:
+            return
+        count: int = len(self.jobs)
+        if count < 2:
+            return
+        rows: list[int] = sorted(
+            {index.row() for index in self.table.selectionModel().selectedRows()}
+        )
+        if not rows:
+            return
+        selected: set[int] = set(rows)
+        jobs: list[BookletJob] = list(self.jobs)
+        # Remember which job the cursor sits on (prefer one inside the
+        # selection over a stale current left by earlier navigation) so the
+        # next plain arrow steps from there after the rebuild.
+        anchor_row: int = self.table.currentIndex().row()
+        if anchor_row not in selected:
+            anchor_row = min(selected)
+        anchor_job: BookletJob = jobs[anchor_row]
+        if delta < 0:
+            if all(r == 0 or (r - 1) in selected for r in rows):
+                # No free step up: send the block to the end.
+                block = [jobs[r] for r in rows]
+                remaining = [j for i, j in enumerate(jobs) if i not in selected]
+                jobs = remaining + block
+                selected = set(range(len(remaining), count))
+            else:
+                for row in rows:  # ascending: each free step up
+                    if row == 0 or (row - 1) in selected:
+                        continue
+                    jobs[row - 1], jobs[row] = jobs[row], jobs[row - 1]
+                    selected.discard(row)
+                    selected.add(row - 1)
+        else:
+            if all(r == count - 1 or (r + 1) in selected for r in rows):
+                # No free step down: send the block to the front.
+                block = [jobs[r] for r in rows]
+                remaining = [j for i, j in enumerate(jobs) if i not in selected]
+                jobs = block + remaining
+                selected = set(range(len(block)))
+            else:
+                for row in reversed(rows):  # descending: each free step down
+                    if row == count - 1 or (row + 1) in selected:
+                        continue
+                    jobs[row + 1], jobs[row] = jobs[row], jobs[row + 1]
+                    selected.discard(row)
+                    selected.add(row + 1)
+        self.jobs = jobs
+        self._save_queue()
+        self._refresh_table()
+        # Keep the moved jobs selected and the cursor on the same job so the
+        # next arrow key steps from there instead of leaping to an end.
+        selection = self.table.selectionModel()
+        selection.clearSelection()
+        flags = (
+            QItemSelectionModel.SelectionFlag.Select
+            | QItemSelectionModel.SelectionFlag.Rows
+        )
+        model = self.table.model()
+        for row in sorted(selected):
+            selection.select(
+                QItemSelection(model.index(row, 0), model.index(row, 0)),
+                flags,
+            )
+        new_anchor: int = next(
+            (i for i, j in enumerate(jobs) if j is anchor_job), -1
+        )
+        if new_anchor < 0 and selected:
+            new_anchor = max(selected)
+        if new_anchor >= 0:
+            # NoUpdate via the selection model: setCurrentIndex would
+            # replace the selection with the new row.
+            selection.setCurrentIndex(
+                model.index(new_anchor, 0),
+                QItemSelectionModel.SelectionFlag.NoUpdate,
+            )
+
     def _on_selection_changed(self) -> None:
         self._update_toolbar_buttons()
 
@@ -696,6 +852,15 @@ class MainWindow(QMainWindow):
         menu = QMenu(self)
         menu.setObjectName("JobContextMenu")
         row = self.table.rowAt(pos.y())
+
+        # Right-clicking an unselected row selects it, so Move Up/Down and
+        # the other row actions target what was clicked (a multi-selection
+        # that already contains the row is left alone).
+        if row >= 0 and row not in {
+            index.row() for index in self.table.selectionModel().selectedRows()
+        }:
+            self.table.clearSelection()
+            self.table.selectRow(row)
 
         add_action = QAction(get_icon("file.svg"), "Add File", self)
         add_action.setShortcut(QKeySequence("Ctrl+N"))
@@ -721,6 +886,16 @@ class MainWindow(QMainWindow):
                     lambda: self._reorder_job_images(row)
                 )
                 menu.addAction(reorder_action)
+
+            move_up_action = QAction(get_icon("expand_less.svg"), "Move Up", self)
+            move_up_action.setShortcut(QKeySequence("Alt+Up"))
+            move_up_action.triggered.connect(lambda: self._move_selected_jobs(-1))
+            menu.addAction(move_up_action)
+
+            move_down_action = QAction(get_icon("expand_more.svg"), "Move Down", self)
+            move_down_action.setShortcut(QKeySequence("Alt+Down"))
+            move_down_action.triggered.connect(lambda: self._move_selected_jobs(1))
+            menu.addAction(move_down_action)
 
             dup_action = QAction(get_icon("file_filled.svg"), "Duplicate Job", self)
             dup_action.triggered.connect(lambda: self._duplicate_job(row))
