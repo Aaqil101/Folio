@@ -1,0 +1,32 @@
+Folio - getting started
+=======================
+
+Folio turns a PDF into a print-ready booklet by imposing its pages
+two-up, so printed sheets fold into a real booklet.
+
+Quick start
+-----------
+1. Drop a PDF (or a folder of images) onto the window, or use the
+   Add File / Add Folder buttons in the top bar.
+2. Check the output path shown in the queue - double-click a job to
+   change it, drag rows to reorder, and use the gear icon for defaults.
+3. Press "Create booklets". Folio verifies every sheet of the result
+   before saving it; if anything is wrong, nothing is written.
+
+Printing the booklet
+--------------------
+Print the produced PDF double-sided, flipping on the short edge, at
+100% scale (no "fit to page"), on the sheet size selected under
+Settings > Sheet size. A4 sheets fold into A5 booklets; A3 into A4.
+Fold each sheet in half and stack them in order - the outermost sheet
+carries the cover.
+
+Settings
+--------
+The gear icon holds your defaults: accent color, default input and
+output folders, output filename pattern, sheet size (A3/A4/A5), and
+whether the job queue is kept between sessions.
+
+Folio runs entirely on your machine - no files are uploaded anywhere.
+
+Project page: https://github.com/Aaqil101/Folio
