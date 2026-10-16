@@ -12,12 +12,7 @@ event with the proposed (move) action.
 
 # ----- PySide6 Modules -----
 from PySide6.QtGui import QDropEvent
-from PySide6.QtWidgets import (
-    QAbstractItemView,
-    QListWidget,
-    QListWidgetItem,
-    QTableWidget,
-)
+from PySide6.QtWidgets import QAbstractItemView, QTableWidget
 
 
 def target_row_for_drop(
@@ -69,36 +64,6 @@ def drop_event_moved(view: QTableWidget, event: QDropEvent) -> bool:
         view, event.position().y(), view.dropIndicatorPosition()
     )
     move_rows(view, rows, target)
-    view.clearSelection()
-    event.acceptProposedAction()
-    return True
-
-
-def drop_event_moved_grid(view: QListWidget, event: QDropEvent) -> bool:
-    """Handle an internal tile drag-drop in an IconMode QListWidget.
-
-    Same contract as drop_event_moved: moves the selection ourselves and
-    returns False for an external source. In IconMode there is no useful
-    above/below indicator, so the block is inserted at the item under the
-    cursor (dropped on empty space = append). Static movement keeps the
-    tiles in their cells; this handler is what actually reorders them.
-    """
-    if event.source() != view:
-        return False
-    items: list[QListWidgetItem] = view.selectedItems()
-    if not items:
-        event.ignore()
-        return True
-    rows: list[int] = sorted({view.row(item) for item in items})
-    index = view.indexAt(event.position().toPoint())
-    target: int = index.row() if index.isValid() else view.count()
-    target -= sum(1 for r in rows if r < target)
-    taken: list[QListWidgetItem] = []
-    for r in reversed(rows):
-        taken.append(view.takeItem(r))
-    taken.reverse()
-    for offset, item in enumerate(taken):
-        view.insertItem(target + offset, item)
     view.clearSelection()
     event.acceptProposedAction()
     return True

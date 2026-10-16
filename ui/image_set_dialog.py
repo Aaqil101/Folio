@@ -1,12 +1,17 @@
 """Image-set dialog: review and reorder the images of one queue job (issue #7).
 
 Opened whenever images enter the queue (Add picker or drag & drop) and
-again when editing an image job. Images default to natural filename order;
-the user drags rows (list view) or tiles (thumbnail view) to reorder,
-nudges the selection with Alt+Left/Alt+Right or the move buttons,
-adds/removes images, or re-sorts by name. The returned order is the page
-order of the booklet. The opening layout follows config.image_view_mode
-("list" or "thumbnails"); toggling inside the dialog does not persist.
+again when editing an image job. The caller supplies the order as-is —
+natural filename order on first ingest, the job's current order when
+reopened — so a previous manual reorder is never discarded. The user
+drags rows in the list view, or nudges the selection with Alt+Up/Down
+(list) / Alt+Left/Right (thumbnails) or the move buttons (the selection
+wraps to the opposite end when no step is free; plain arrow keys only
+walk the highlight and also wrap at the ends), adds/removes images, or
+re-sorts by name. Thumbnail view is reorder by buttons/shortcuts only
+(drag is disabled there). The returned order is the page order of the
+booklet. The opening layout follows config.image_view_mode ("list" or
+"thumbnails"); toggling inside the dialog does not persist.
 """
 
 # ----- Built-In Modules -----
@@ -49,7 +54,7 @@ from PIL import Image, ImageOps
 from core.image_booklet import IMAGE_EXTENSIONS, _read_image_meta, natural_sort
 
 # ----- UI Modules -----
-from ui.reorder import drop_event_moved, drop_event_moved_grid
+from ui.reorder import drop_event_moved
 
 # ----- Utils Modules -----
 from utils.color import COLOR_GREEN, THEME_TEXT_PRIMARY
@@ -86,29 +91,46 @@ class _ImageTable(QTableWidget):
     def keyPressEvent(self, event: QKeyEvent) -> None:
         if (
             event.modifiers() & Qt.KeyboardModifier.AltModifier
-            and event.key() in (Qt.Key.Key_Left, Qt.Key.Key_Right)
+            and event.key() in (Qt.Key.Key_Up, Qt.Key.Key_Down)
         ):
+            # Rows are vertical: Alt+Up/Down reorders (matching axis).
             self._dialog._move_selected(
-                -1 if event.key() == Qt.Key.Key_Left else 1
+                -1 if event.key() == Qt.Key.Key_Up else 1
             )
             event.accept()
             return
+        if event.modifiers() == Qt.KeyboardModifier.NoModifier and event.key() in (
+            Qt.Key.Key_Up,
+            Qt.Key.Key_Down,
+            Qt.Key.Key_Left,
+            Qt.Key.Key_Right,
+        ):
+            # Plain arrows walk the rows and wrap at the ends (the highlight
+            # loops 1 <-> 12); column navigation is useless in this dialog
+            # and made the arrows feel dead at the edges.
+            count = self.rowCount()
+            if count:
+                row = self.currentIndex().row()
+                if row < 0:
+                    row = 0 if event.key() in (Qt.Key.Key_Down, Qt.Key.Key_Right) else count - 1
+                elif event.key() in (Qt.Key.Key_Down, Qt.Key.Key_Right):
+                    row = (row + 1) % count
+                else:
+                    row = (row - 1 + count) % count
+                col = self.currentColumn()
+                self.setCurrentIndex(self.model().index(row, col if col >= 0 else 0))
+                self.selectRow(row)
+                event.accept()
+                return
         super().keyPressEvent(event)
 
 
 class _ImageGrid(QListWidget):
-    """Icon-mode grid that reorders tiles on drop (Static movement)."""
+    """Icon-mode grid of tiles; reorder via buttons/shortcuts only."""
 
     def __init__(self, dialog: "ImageSetDialog", parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._dialog = dialog
-
-    def dropEvent(self, event: QDropEvent) -> None:
-        # No super() fallback: InternalMove already rejects external drags in
-        # dragEnterEvent, and QListView::dropEvent hard-crashes on a foreign
-        # source event (verified offscreen) — ignore anything unhandled.
-        if not drop_event_moved_grid(self, event):
-            event.ignore()
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
         if (
@@ -120,6 +142,27 @@ class _ImageGrid(QListWidget):
             )
             event.accept()
             return
+        if event.modifiers() == Qt.KeyboardModifier.NoModifier and event.key() in (
+            Qt.Key.Key_Left,
+            Qt.Key.Key_Right,
+        ):
+            # Plain arrows jump between tiles and wrap at the ends.
+            count = self.count()
+            if count:
+                row = self.currentRow()
+                if row < 0:
+                    row = 0 if event.key() == Qt.Key.Key_Right else count - 1
+                elif event.key() == Qt.Key.Key_Right:
+                    row = (row + 1) % count
+                else:
+                    row = (row - 1 + count) % count
+                item = self.item(row)
+                if item is not None:
+                    self.setCurrentRow(row)
+                    self.clearSelection()
+                    item.setSelected(True)
+                    event.accept()
+                    return
         super().keyPressEvent(event)
 
 
@@ -129,15 +172,17 @@ class ImageSetDialog(QDialog):
     def __init__(self, paths: list[str], parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setWindowTitle("Arrange images")
-        self.setMinimumSize(940, 620)
+        self.setMinimumSize(970, 640)
 
         self._view_mode: str = config.image_view_mode
         self._thumb_cache: dict[str, QPixmap | None] = {}
 
         self._build_ui()
-        self._apply_paths(
-            [str(p) for p in natural_sort([Path(p) for p in paths])]
-        )
+        # Keep the caller's order: _prompt_image_job() hands over a
+        # natural-sorted list for a fresh set, while _reorder_job_images()
+        # and JobDialog pass the job's current order — re-sorting here
+        # would throw a manual reorder away on every reopen.
+        self._apply_paths([str(p) for p in paths])
 
     # ----- UI -----
 
@@ -149,11 +194,8 @@ class ImageSetDialog(QDialog):
         hint: QWidget = QWidget()
         hint_layout: QHBoxLayout = QHBoxLayout(hint)
         hint_layout.setContentsMargins(0, 0, 0, 0)
-        hint_label: QLabel = QLabel(
-            "Drag to set the booklet page order. "
-            "The first item becomes page 1."
-        )
-        hint_layout.addWidget(hint_label)
+        self.hint_label: QLabel = QLabel()
+        hint_layout.addWidget(self.hint_label)
         hint_layout.addStretch()
 
         self.list_btn: QToolButton = QToolButton(hint)
@@ -182,6 +224,7 @@ class ImageSetDialog(QDialog):
 
         self.list_btn.setChecked(self._view_mode == "list")
         self.thumb_btn.setChecked(self._view_mode == "thumbnails")
+        self._update_hint()
 
         layout.addWidget(hint)
 
@@ -218,20 +261,14 @@ class ImageSetDialog(QDialog):
         self.grid.setWrapping(True)
         self.grid.setResizeMode(QListWidget.ResizeMode.Adjust)
         self.grid.setSelectionMode(QListWidget.SelectionMode.ExtendedSelection)
-        # IconMode defaults to Free movement: the tile follows the cursor
-        # anywhere and stays where it is dropped instead of re-flowing into
-        # the grid. Static keeps every tile locked in its cell; a drop only
-        # reorders the model and the view re-lays the grid out itself.
-        # IMPORTANT: setMovement(Static) resets dragEnabled/dragDropMode in
-        # Qt, so it must run BEFORE setDragDropMode or dragging dies.
+        # Drag reorder is deliberately OFF in the thumbnail view (user
+        # decision after the real-window eyeball pass: Qt's IconMode drop
+        # handling misbehaved in practice). Reordering there is via the
+        # move buttons / Alt+Left / Alt+Right; the list view keeps
+        # pointer-drag reorder. Static locks every tile in its cell so a
+        # stray press-drag never leaves a tile floating mid-grid.
         self.grid.setMovement(QListWidget.Movement.Static)
-        self.grid.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove)
-        # setMovement(Static) turns viewport acceptDrops off; setDragDropMode
-        # only re-enables it on the view, and AcceptDropsChange is skipped when
-        # the view flag is already True — so the viewport stays drop-dead and
-        # real drops never reach dropEvent. Re-enable it explicitly.
-        self.grid.viewport().setAcceptDrops(True)
-        self.grid.setDragDropOverwriteMode(False)
+        self.grid.setDragDropMode(QAbstractItemView.DragDropMode.NoDragDrop)
         self.grid.setIconSize(QSize(THUMBNAIL_SIZE, THUMBNAIL_SIZE))
         self.grid.setGridSize(TILE_SIZE)
         self.grid.setWordWrap(True)
@@ -304,6 +341,7 @@ class ImageSetDialog(QDialog):
         self.move_right_btn.setToolTip("Move right (Alt+Right)")
         self.move_right_btn.clicked.connect(lambda: self._move_selected(1))
         row_buttons.addWidget(self.move_right_btn)
+        self._update_move_tooltips()
 
         self.sort_btn: QPushButton = QPushButton("Sort by name", self)
         self.sort_btn.setProperty("BrowseButton", True)
@@ -315,19 +353,22 @@ class ImageSetDialog(QDialog):
         row_buttons.addStretch()
         layout.addLayout(row_buttons)
 
-        # Alt+Left/Alt+Right on the dialog (WindowShortcut): fires whichever
-        # view has focus — the table also swallows Alt+arrows as cell
-        # navigation, so both views additionally handle it in keyPressEvent.
-        self._move_left_shortcut = QShortcut(QKeySequence("Alt+Left"), self)
-        self._move_left_shortcut.setContext(Qt.ShortcutContext.WindowShortcut)
-        self._move_left_shortcut.activated.connect(
-            lambda: self._move_selected(-1)
-        )
-        self._move_right_shortcut = QShortcut(QKeySequence("Alt+Right"), self)
-        self._move_right_shortcut.setContext(Qt.ShortcutContext.WindowShortcut)
-        self._move_right_shortcut.activated.connect(
-            lambda: self._move_selected(1)
-        )
+        # Alt+arrow reorders along each view's flow: Alt+Up/Down in the
+        # list (rows are vertical), Alt+Left/Right in thumbnails (tiles run
+        # horizontally). All four are registered dialog-wide (WindowShortcut)
+        # so a press still lands when focus sits on a button; the handler
+        # ignores the keys on the wrong axis for the active view.
+        self._move_shortcuts: list[QShortcut] = []
+        for sequence, key in (
+            ("Alt+Up", Qt.Key.Key_Up),
+            ("Alt+Down", Qt.Key.Key_Down),
+            ("Alt+Left", Qt.Key.Key_Left),
+            ("Alt+Right", Qt.Key.Key_Right),
+        ):
+            shortcut = QShortcut(QKeySequence(sequence), self)
+            shortcut.setContext(Qt.ShortcutContext.WindowShortcut)
+            shortcut.activated.connect(lambda k=key: self._move_for_key(k))
+            self._move_shortcuts.append(shortcut)
 
         # --- Dialog buttons (mirror JobDialog) ---
         button_layout: QHBoxLayout = QHBoxLayout()
@@ -464,6 +505,30 @@ class ImageSetDialog(QDialog):
         for path in paths:
             self.grid.addItem(self._grid_item(path))
 
+    def _update_hint(self) -> None:
+        """The hint matches what the active view actually supports."""
+        if self._view_mode == "thumbnails":
+            self.hint_label.setText(
+                "Use Alt+Left / Alt+Right or the arrow buttons to set the "
+                "page order. Arrow keys jump between images and wrap around "
+                "at the ends. The first item becomes page 1."
+            )
+        else:
+            self.hint_label.setText(
+                "Drag rows or press Alt+Up / Alt+Down to set the page order. "
+                "Arrow keys move the highlight and wrap around at the ends. "
+                "The first item becomes page 1."
+            )
+
+    def _update_move_tooltips(self) -> None:
+        """The move buttons name the shortcut of the active view's axis."""
+        if self._view_mode == "thumbnails":
+            self.move_left_btn.setToolTip("Move left (Alt+Left)")
+            self.move_right_btn.setToolTip("Move right (Alt+Right)")
+        else:
+            self.move_left_btn.setToolTip("Move up (Alt+Up)")
+            self.move_right_btn.setToolTip("Move down (Alt+Down)")
+
     def _set_view(self, mode: str) -> None:
         if mode == self._view_mode:
             return
@@ -471,6 +536,8 @@ class ImageSetDialog(QDialog):
         self._view_mode = mode
         self._stack.setCurrentWidget(self.grid if mode == "thumbnails" else self.table)
         self._apply_paths(paths)
+        self._update_hint()
+        self._update_move_tooltips()
 
     # ----- Actions -----
 
@@ -506,8 +573,30 @@ class ImageSetDialog(QDialog):
         paths = natural_sort([Path(p) for p in self.image_paths])
         self._apply_paths([str(p) for p in paths])
 
+    def _move_for_key(self, key: int) -> None:
+        """Alt+arrow move, axis-matched to the active view.
+
+        List rows are vertical (Alt+Up/Down); thumbnail tiles run
+        horizontally (Alt+Left/Right). The wrong axis is ignored.
+        """
+        if self._view_mode == "thumbnails":
+            if key == Qt.Key.Key_Left:
+                self._move_selected(-1)
+            elif key == Qt.Key.Key_Right:
+                self._move_selected(1)
+        elif key == Qt.Key.Key_Up:
+            self._move_selected(-1)
+        elif key == Qt.Key.Key_Down:
+            self._move_selected(1)
+
     def _move_selected(self, delta: int) -> None:
-        """Shift the selected rows one step left (-1) or right (+1)."""
+        """Shift the selected rows one step left (-1) or right (+1).
+
+        When no row of the selection can step freely (every row is at the
+        edge or blocked by its own selection neighbour), the whole block
+        wraps to the opposite end, keeping its internal order — the list
+        behaves like a ring.
+        """
         current: list[str] = self.image_paths
         count: int = len(current)
         if count < 2:
@@ -521,20 +610,46 @@ class ImageSetDialog(QDialog):
         if not rows:
             return
         selected: set[int] = set(rows)
-        if delta < 0:
-            for row in rows:  # ascending: each free step left
-                if row == 0 or (row - 1) in selected:
-                    continue
-                current[row - 1], current[row] = current[row], current[row - 1]
-                selected.discard(row)
-                selected.add(row - 1)
+        # Remember which image the cursor sits on: the rebuild below wipes
+        # the views' current item, and without this the next plain arrow
+        # starts from -1 and jumps to the first/last tile. Prefer the row
+        # the user is working with (current, if it's part of the move) over
+        # a stale current left behind by earlier navigation.
+        if self._stack.currentWidget() is self.grid:
+            anchor_row = self.grid.currentRow()
         else:
-            for row in reversed(rows):  # descending: each free step right
-                if row == count - 1 or (row + 1) in selected:
-                    continue
-                current[row + 1], current[row] = current[row], current[row + 1]
-                selected.discard(row)
-                selected.add(row + 1)
+            anchor_row = self.table.currentIndex().row()
+        if anchor_row not in selected:
+            anchor_row = min(selected)
+        anchor_path = current[anchor_row]
+        if delta < 0:
+            if all(r == 0 or (r - 1) in selected for r in rows):
+                # No free step left: send the block to the end.
+                block = [current[r] for r in rows]
+                remaining = [p for i, p in enumerate(current) if i not in selected]
+                current = remaining + block
+                selected = set(range(len(remaining), count))
+            else:
+                for row in rows:  # ascending: each free step left
+                    if row == 0 or (row - 1) in selected:
+                        continue
+                    current[row - 1], current[row] = current[row], current[row - 1]
+                    selected.discard(row)
+                    selected.add(row - 1)
+        else:
+            if all(r == count - 1 or (r + 1) in selected for r in rows):
+                # No free step right: send the block to the front.
+                block = [current[r] for r in rows]
+                remaining = [p for i, p in enumerate(current) if i not in selected]
+                current = block + remaining
+                selected = set(range(len(block)))
+            else:
+                for row in reversed(rows):  # descending: each free step right
+                    if row == count - 1 or (row + 1) in selected:
+                        continue
+                    current[row + 1], current[row] = current[row], current[row + 1]
+                    selected.discard(row)
+                    selected.add(row + 1)
         self._apply_paths(current)
         # Keep the moved rows selected so the user can keep tapping the button
         if self._stack.currentWidget() is self.grid:
@@ -554,6 +669,25 @@ class ImageSetDialog(QDialog):
                 selection.select(
                     QItemSelection(model.index(row, 0), model.index(row, 0)),
                     flags,
+                )
+        # Put the cursor back on the same image so the next arrow key
+        # steps from there instead of leaping to an end.
+        new_row = current.index(anchor_path) if anchor_path is not None else -1
+        if new_row < 0 and selected:
+            new_row = max(selected)
+        if new_row >= 0:
+            if self._stack.currentWidget() is self.grid:
+                # NoUpdate: don't clobber the restored multi-selection.
+                self.grid.setCurrentRow(
+                    new_row, QItemSelectionModel.SelectionFlag.NoUpdate
+                )
+            else:
+                # NoUpdate via the selection model: QTableWidget's own
+                # setCurrentIndex replaces the selection with the new row.
+                col = self.table.currentColumn()
+                self.table.selectionModel().setCurrentIndex(
+                    self.table.model().index(new_row, col if col >= 0 else 0),
+                    QItemSelectionModel.SelectionFlag.NoUpdate,
                 )
 
     # ----- Result -----
